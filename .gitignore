@@ -20,10 +20,10 @@ audio_cleaner
 Thumbs.db
 
 # Audio files (examples - uncomment if you want to ignore)
-# *.mp3
-# *.wav
-# *.wma
-# *.ogg
+ *.mp3
+ *.wav
+ *.wma
+ *.ogg
 
 # CMake files
 CMakeCache.txt
