@@ -19,11 +19,15 @@ audio_cleaner
 .DS_Store
 Thumbs.db
 
-# Audio files (examples - uncomment if you want to ignore)
- *.mp3
- *.wav
- *.wma
- *.ogg
+# Audio files (exclude all audio files from repo)
+*.mp3
+*.wav
+*.wma
+*.ogg
+*.oga
+*.flac
+*.aac
+*.m4a
 
 # CMake files
 CMakeCache.txt
