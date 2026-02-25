@@ -69,7 +69,11 @@ void CPUBackend::spectralSubtraction(
     float alpha, float beta
 ) {
     const size_t N = spectrum.size();
-    for (size_t i = 0; i < N; ++i) {
+    const size_t halfN = N / 2;
+    
+    // Process only the first half of the spectrum (DC to Nyquist)
+    // noiseSpectrum only has N/2 + 1 elements
+    for (size_t i = 0; i <= halfN; ++i) {
         float magnitude = std::abs(spectrum[i]);
         float phase = std::arg(spectrum[i]);
         
@@ -77,6 +81,11 @@ void CPUBackend::spectralSubtraction(
         subtractedMagnitude = std::max(subtractedMagnitude, beta * magnitude);
         
         spectrum[i] = std::polar(subtractedMagnitude, phase);
+        
+        // Mirror to second half (conjugate symmetry for real signals)
+        if (i > 0 && i < halfN) {
+            spectrum[N - i] = std::polar(subtractedMagnitude, -phase);
+        }
     }
 }
 

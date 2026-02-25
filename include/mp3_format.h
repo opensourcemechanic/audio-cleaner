@@ -38,10 +38,12 @@ public:
     }
     bool canHandle(const std::string& filename) const override;
 };
+#endif // HAVE_MPG123
 
+#ifdef HAVE_LAME
 class Mp3Writer : public IAudioWriter {
 private:
-    lame_global_flags* lameHandle; // LAME encoder handle
+    lame_t lameHandle;
     AudioFormat format;
     bool isOpen;
     int quality; // 0-9, 0 being highest quality
@@ -64,6 +66,7 @@ public:
     
     void setQuality(int q) { quality = std::max(0, std::min(9, q)); }
 };
+#endif // HAVE_LAME
 
 #if defined(HAVE_MPG123) && defined(HAVE_LAME)
 class Mp3Format : public IAudioFormat {
@@ -96,33 +99,3 @@ public:
     int getPriority() const override { return 8; } // Medium-high priority
 };
 #endif // HAVE_MPG123 && HAVE_LAME
-
-#endif // HAVE_MPG123
-
-#ifdef HAVE_LAME
-class Mp3Writer : public IAudioWriter {
-private:
-    lame_t lameHandle;
-    AudioFormat format;
-    bool isOpen;
-    int quality; // 0-9, 0 being highest quality
-    std::string filename;
-    std::ofstream file;
-    
-public:
-    Mp3Writer(int quality = 2);
-    ~Mp3Writer() override;
-    
-    bool open(const std::string& filename, const AudioFormat& format) override;
-    bool write(const std::vector<int16_t>& audioData) override;
-    void close() override;
-    
-    std::string getFormatName() const override { return "MP3"; }
-    std::vector<std::string> getSupportedExtensions() const override {
-        return {"mp3"};
-    }
-    bool canHandle(const std::string& filename) const override;
-    
-    void setQuality(int q) { quality = std::max(0, std::min(9, q)); }
-};
-#endif
