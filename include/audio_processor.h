@@ -5,12 +5,11 @@
 
 class AudioProcessor {
 private:
-    static const int FFT_SIZE = 1024;
-    static const int OVERLAP_FACTOR = 4;
-    
+    int fftSize;
+    int hopSize;
     std::vector<std::complex<float>> fftBuffer;
     std::vector<float> window;
-    std::vector<float> noiseSpectrum;
+    std::vector<std::complex<float>> noiseSpectrum;
     std::vector<std::complex<float>> adaptiveFilter;
     float learningRate;
     
@@ -24,13 +23,17 @@ private:
     void normalizeAudio(std::vector<int16_t>& audio, float targetLevel = -6.0f);
     
 public:
-    AudioProcessor();
+    AudioProcessor(int fftSize = 1024);
     
     void processEchoCancellation(std::vector<int16_t>& audio, const std::vector<int16_t>& reference);
     void processNoiseReduction(std::vector<int16_t>& audio);
     void processFull(std::vector<int16_t>& audio, const std::vector<int16_t>& reference);
     void processLowFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency = 80.0f);
     void processNormalization(std::vector<int16_t>& audio, float targetLevel = -6.0f);
+    void processClippingReduction(std::vector<int16_t>& audio, float threshold = 0.95f);
+    
+    void setFFTSize(int size);
+    int getFFTSize() const { return fftSize; }
     
     void setLearningRate(float rate) { learningRate = rate; }
     float getLearningRate() const { return learningRate; }

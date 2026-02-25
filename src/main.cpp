@@ -41,6 +41,9 @@ void printUsage(const char* programName) {
     std::cout << "  -l <learning_rate>  Learning rate for adaptive filter (0.001-0.1, default: 0.01)\n";
     std::cout << "  --low-freq <hz>     Remove low-frequency noise below specified Hz (20-500, default: 80)\n";
     std::cout << "  --normalize <db>    Normalize audio to target level in dBFS (-60 to 0, default: -6)\n";
+    std::cout << "  --fft-size <size>   FFT size for spectral analysis (128-65536, power of 2, default: 1024)\n";
+    std::cout << "  --reduce-clipping   Smooth clipped audio peaks (default threshold: 95%)\n";
+    std::cout << "  --clipping-threshold <threshold> Clipping threshold (0.8-0.99, default: 0.95)\n";
     std::cout << "  -f                  List supported formats\n";
     std::cout << "  -h                  Show this help\n\n";
     std::cout << "Supported formats: ";
@@ -65,6 +68,16 @@ void printUsage(const char* programName) {
     std::cout << "    # Normalize to conservative level (-12 dBFS)\n\n";
     std::cout << "  " << programName << " -i audio.wma -o cleaned.wav --low-freq 80\n";
     std::cout << "    # Process WMA file and output to WAV\n\n";
+    std::cout << "  " << programName << " -i noisy.wav -o clean.wav --fft-size 512\n";
+    std::cout << "    # Faster processing with 512-point FFT\n\n";
+    std::cout << "  " << programName << " -i noisy.wav -o clean.wav --fft-size 4096\n";
+    std::cout << "    # Higher quality with 4096-point FFT\n\n";
+    std::cout << "  " << programName << " -i noisy.wav -o clean.wav --fft-size 65536\n";
+    std::cout << "    # Studio quality with 65536-point FFT (very slow)\n\n";
+    std::cout << "  " << programName << " -i clipped.wav -o smooth.wav --reduce-clipping\n";
+    std::cout << "    # Smooth clipped audio peaks to reduce distortion\n\n";
+    std::cout << "  " << programName << " -i heavily_clipped.wav -o smooth.wav --reduce-clipping --clipping-threshold 0.9\n";
+    std::cout << "    # More aggressive clipping reduction at 90% threshold\n\n";
     std::cout << "Technical Details:\n";
     std::cout << "  • FFT Size: 1024 samples with 75% overlap\n";
     std::cout << "  • Window: Hann window for smooth transitions\n";
@@ -82,6 +95,9 @@ int main(int argc, char* argv[]) {
     bool enableLowFreqRemoval = false;
     float normalizeLevel = 0.0f; // 0 = disabled
     bool enableNormalization = false;
+    int fftSize = 1024;
+    bool enableClippingReduction = false;
+    float clippingThreshold = 0.95f;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -131,6 +147,25 @@ int main(int argc, char* argv[]) {
                 // No value provided, use default -6dB
                 normalizeLevel = -6.0f;
                 enableNormalization = true;
+            }
+        }
+        else if (arg == "--fft-size" && i + 1 < argc) {
+            fftSize = std::stoi(argv[++i]);
+            // Validate FFT size (must be power of 2 and between 128 and 65536)
+            if (fftSize < 128 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
+                std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
+                fftSize = 1024;
+            }
+        }
+        else if (arg == "--reduce-clipping") {
+            enableClippingReduction = true;
+        }
+        else if (arg == "--clipping-threshold" && i + 1 < argc) {
+            clippingThreshold = std::stof(argv[++i]);
+            // Validate threshold (must be between 0.8 and 0.99)
+            if (clippingThreshold < 0.8f || clippingThreshold > 0.99f) {
+                std::cerr << "Warning: Invalid clipping threshold " << clippingThreshold << ", using 0.95" << std::endl;
+                clippingThreshold = 0.95f;
             }
         }
     }
@@ -186,7 +221,7 @@ int main(int argc, char* argv[]) {
     std::cout << inputFormat.numChannels << " channels, ";
     std::cout << "Format: " << loader.getFormat().bitsPerSample << "-bit\n";
     
-    AudioProcessor processor;
+    AudioProcessor processor(fftSize);
     processor.setLearningRate(learningRate);
     
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -236,10 +271,16 @@ int main(int argc, char* argv[]) {
         processor.processNormalization(audioData, normalizeLevel);
     }
     
+    // Apply clipping reduction if enabled
+    if (enableClippingReduction) {
+        processor.processClippingReduction(audioData, clippingThreshold);
+    }
+    
     std::cout << "\n=== PROCESSING DETAILS ===\n";
-    std::cout << "   • FFT Size: 1024 samples\n";
+    std::cout << "   • FFT Size: " << fftSize << " samples with 75% overlap\n";
+    std::cout << "   • Frequency Resolution: " << (44100.0f / fftSize) << " Hz per bin\n";
+    std::cout << "   • Time Resolution: " << (fftSize / 44100.0f * 1000) << " ms per frame\n";
     std::cout << "   • Window Function: Hann window\n";
-    std::cout << "   • Overlap: 75% (256-sample hop size)\n";
     std::cout << "   • Sample Resolution: 16-bit PCM\n";
     std::cout << "\n";
     

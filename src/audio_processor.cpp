@@ -5,18 +5,57 @@
 
 const float PI = 3.14159265359f;
 
-AudioProcessor::AudioProcessor() : learningRate(0.01f) {
-    fftBuffer.resize(FFT_SIZE);
-    window.resize(FFT_SIZE);
-    noiseSpectrum.resize(FFT_SIZE / 2 + 1);
-    adaptiveFilter.resize(FFT_SIZE / 2 + 1);
-    
-    for (int i = 0; i < FFT_SIZE; ++i) {
-        window[i] = 0.5f * (1.0f - cosf(2.0f * PI * i / (FFT_SIZE - 1)));
+AudioProcessor::AudioProcessor(int fftSize) : fftSize(fftSize), learningRate(0.01f) {
+    // Validate FFT size (must be power of 2 and between 128 and 65536)
+    if (fftSize < 128 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
+        std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
+        this->fftSize = 1024;
     }
+    
+    hopSize = this->fftSize / 4; // 75% overlap
+    
+    // Initialize FFT buffer and window
+    fftBuffer.resize(this->fftSize);
+    window.resize(this->fftSize);
+    
+    // Create Hann window
+    for (int i = 0; i < this->fftSize; i++) {
+        window[i] = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (this->fftSize - 1)));
+    }
+    
+    noiseSpectrum.resize(this->fftSize / 2 + 1);
+    adaptiveFilter.resize(this->fftSize / 2 + 1);
     
     std::fill(noiseSpectrum.begin(), noiseSpectrum.end(), 0.0f);
     std::fill(adaptiveFilter.begin(), adaptiveFilter.end(), 0.0f);
+}
+
+void AudioProcessor::setFFTSize(int size) {
+    // Validate FFT size (must be power of 2 and between 128 and 65536)
+    if (size < 128 || size > 65536 || (size & (size - 1)) != 0) {
+        std::cerr << "Warning: Invalid FFT size " << size << ", keeping current size " << fftSize << std::endl;
+        return;
+    }
+    
+    fftSize = size;
+    hopSize = fftSize / 4; // 75% overlap
+    
+    // Reinitialize buffers with new size
+    fftBuffer.resize(fftSize);
+    window.resize(fftSize);
+    noiseSpectrum.resize(fftSize / 2 + 1);
+    adaptiveFilter.resize(fftSize / 2 + 1);
+    
+    // Recreate Hann window
+    for (int i = 0; i < fftSize; i++) {
+        window[i] = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (fftSize - 1)));
+    }
+    
+    // Reset noise spectrum and adaptive filter
+    std::fill(noiseSpectrum.begin(), noiseSpectrum.end(), 0.0f);
+    std::fill(adaptiveFilter.begin(), adaptiveFilter.end(), 0.0f);
+    
+    std::cout << "FFT size changed to " << fftSize << " points" << std::endl;
 }
 
 void AudioProcessor::fft(std::vector<std::complex<float>>& data) {
@@ -61,50 +100,52 @@ void AudioProcessor::applyWindow(std::vector<float>& frame) {
 }
 
 void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
-    const int NOISE_FRAMES = 10;
-    std::vector<float> frame(FFT_SIZE, 0.0f);
-    std::vector<std::complex<float>> spectrum(FFT_SIZE);
+    const int NOISE_FRAMES = 3;  // Reduced from 10 to use fewer frames
+    std::vector<float> frame(fftSize, 0.0f);
+    std::vector<std::complex<float>> spectrum(fftSize);
     
     std::fill(noiseSpectrum.begin(), noiseSpectrum.end(), 0.0f);
     
-    for (int frameNum = 0; frameNum < NOISE_FRAMES && frameNum * FFT_SIZE / 2 < static_cast<int>(audio.size()); ++frameNum) {
-        for (int i = 0; i < FFT_SIZE && frameNum * FFT_SIZE / 2 + i < static_cast<int>(audio.size()); ++i) {
-            frame[i] = static_cast<float>(audio[frameNum * FFT_SIZE / 2 + i]) / 32768.0f;
+    for (int frameNum = 0; frameNum < NOISE_FRAMES && frameNum * fftSize / 2 < static_cast<int>(audio.size()); ++frameNum) {
+        for (int i = 0; i < fftSize && frameNum * fftSize / 2 + i < static_cast<int>(audio.size()); ++i) {
+            frame[i] = static_cast<float>(audio[frameNum * fftSize / 2 + i]) / 32768.0f;
         }
         
         applyWindow(frame);
         
-        for (int i = 0; i < FFT_SIZE; ++i) {
+        for (int i = 0; i < fftSize; ++i) {
             spectrum[i] = std::complex<float>(frame[i], 0);
         }
         
         fft(spectrum);
         
-        for (int i = 0; i <= FFT_SIZE / 2; ++i) {
+        for (int i = 0; i <= fftSize / 2; ++i) {
             float magnitude = std::abs(spectrum[i]);
             noiseSpectrum[i] += magnitude * magnitude;
         }
     }
     
-    for (int i = 0; i <= FFT_SIZE / 2; ++i) {
-        noiseSpectrum[i] = sqrtf(noiseSpectrum[i] / NOISE_FRAMES);
+    for (int i = 0; i <= fftSize / 2; ++i) {
+        noiseSpectrum[i] = sqrtf(std::abs(noiseSpectrum[i]) / NOISE_FRAMES);
+        // Scale down the noise estimate to be more conservative
+        noiseSpectrum[i] *= 0.5f;
     }
 }
 
 void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spectrum) {
-    const float ALPHA = 2.0f;
-    const float BETA = 0.01f;
+    const float ALPHA = 0.8f;  // Much more conservative
+    const float BETA = 0.1f;   // Higher floor to preserve more signal
     
-    for (int i = 0; i <= FFT_SIZE / 2; ++i) {
+    for (int i = 0; i <= fftSize / 2; ++i) {
         float magnitude = std::abs(spectrum[i]);
         float phase = std::arg(spectrum[i]);
         
-        float subtractedMagnitude = magnitude - ALPHA * noiseSpectrum[i];
+        float subtractedMagnitude = magnitude - ALPHA * std::abs(noiseSpectrum[i]);
         subtractedMagnitude = std::max(subtractedMagnitude, BETA * magnitude);
         
         spectrum[i] = std::polar(subtractedMagnitude, phase);
-        if (i > 0 && i < FFT_SIZE / 2) {
-            spectrum[FFT_SIZE - i] = std::polar(subtractedMagnitude, -phase);
+        if (i > 0 && i < fftSize / 2) {
+            spectrum[fftSize - i] = std::polar(subtractedMagnitude, -phase);
         }
     }
 }
@@ -145,39 +186,77 @@ void AudioProcessor::processEchoCancellation(std::vector<int16_t>& audio, const 
 }
 
 void AudioProcessor::processNoiseReduction(std::vector<int16_t>& audio) {
+    std::cout << "🔧 NOISE REDUCTION ONLY:\n";
+    std::cout << "   • Spectral Subtraction Algorithm:\n";
+    std::cout << "     - Converts audio to frequency domain using " << fftSize << "-point FFT\n";
+    std::cout << "     - Uses 75% overlap windowing for smooth transitions\n";
+    std::cout << "     - Frequency resolution: " << (44100.0f / fftSize) << " Hz per bin\n";
+    std::cout << "     - Time resolution: " << (fftSize / 44100.0f * 1000) << " ms per frame\n";
+    std::cout << "     - Estimates noise profile from first audio frames\n";
+    std::cout << "     - Subtracts estimated noise from frequency spectrum\n";
+    std::cout << "     - Applies Hann window to reduce spectral artifacts\n";
+    std::cout << "     - Converts back to time domain with overlap-add\n\n";
+    std::cout << "   • Best for: Stationary background noise (hiss, hum, fan noise)\n";
+    std::cout << "   • Limitations: Less effective for rapidly changing noise\n";
+    std::cout << "\n";
+    
+    // Estimate noise spectrum from first few frames
     estimateNoiseSpectrum(audio);
     
-    std::vector<float> frame(FFT_SIZE, 0.0f);
-    std::vector<float> overlap(FFT_SIZE / 2, 0.0f);
-    std::vector<std::complex<float>> spectrum(FFT_SIZE);
+    // Process audio in overlapping frames
+    std::vector<float> frame(fftSize);
+    std::vector<std::complex<float>> spectrum(fftSize);
+    std::vector<float> output(audio.size(), 0.0f);
+    std::vector<float> windowSum(audio.size(), 0.0f);
     
-    for (size_t pos = 0; pos < audio.size(); pos += FFT_SIZE / 2) {
-        for (int i = 0; i < FFT_SIZE; ++i) {
-            if (pos + i < audio.size()) {
-                frame[i] = static_cast<float>(audio[pos + i]) / 32768.0f;
-            } else {
-                frame[i] = 0.0f;
-            }
+    for (size_t i = 0; i + fftSize <= audio.size(); i += hopSize) {
+        // Extract frame
+        for (int j = 0; j < fftSize; j++) {
+            frame[j] = static_cast<float>(audio[i + j]) / 32768.0f;
         }
         
+        // Apply window
         applyWindow(frame);
         
-        for (int i = 0; i < FFT_SIZE; ++i) {
-            spectrum[i] = std::complex<float>(frame[i], 0);
+        // Convert to frequency domain
+        for (int j = 0; j < fftSize; j++) {
+            spectrum[j] = std::complex<float>(frame[j], 0.0f);
         }
-        
         fft(spectrum);
+        
+        // Apply spectral subtraction
         spectralSubtraction(spectrum);
+        
+        // Convert back to time domain
         ifft(spectrum);
         
-        for (int i = 0; i < FFT_SIZE / 2; ++i) {
-            float sample = spectrum[i].real() + overlap[i];
-            if (pos + i < audio.size()) {
-                audio[pos + i] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, sample * 32768.0f)));
+        // Add to output with overlap-add
+        for (int j = 0; j < fftSize; j++) {
+            if (i + j < output.size()) {
+                output[i + j] += spectrum[j].real();
+                windowSum[i + j] += window[j];
             }
-            overlap[i] = spectrum[i + FFT_SIZE / 2].real();
         }
     }
+    
+    // Normalize by window sum with soft clipping
+    for (size_t i = 0; i < output.size(); i++) {
+        if (windowSum[i] > 0.0f) {
+            output[i] /= windowSum[i];
+            
+            // Apply soft clipping to prevent harsh distortion
+            float sample = output[i] * 32768.0f;
+            if (sample > 30000.0f) {
+                sample = 30000.0f + (sample - 30000.0f) * 0.1f; // Soft limiting
+            } else if (sample < -30000.0f) {
+                sample = -30000.0f + (sample + 30000.0f) * 0.1f; // Soft limiting
+            }
+            
+            audio[i] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, sample)));
+        }
+    }
+    
+    std::cout << "✅ Applied: Noise reduction only\n";
 }
 
 void AudioProcessor::processFull(std::vector<int16_t>& audio, const std::vector<int16_t>& reference) {
@@ -185,6 +264,56 @@ void AudioProcessor::processFull(std::vector<int16_t>& audio, const std::vector<
         processEchoCancellation(audio, reference);
     }
     processNoiseReduction(audio);
+}
+
+void AudioProcessor::processClippingReduction(std::vector<int16_t>& audio, float threshold) {
+    std::cout << "🔧 CLIPPING REDUCTION:\n";
+    std::cout << "   • Soft clipping algorithm to smooth distorted peaks\n";
+    std::cout << "   • Threshold: " << threshold << " (" << (threshold * 100) << "% of full scale)\n";
+    std::cout << "   • Applies gentle compression to clipped regions\n";
+    std::cout << "   • Preserves audio dynamics while reducing harsh distortion\n\n";
+    
+    const int16_t clipThreshold = static_cast<int16_t>(threshold * 32767.0f);
+    const int16_t hardClip = 32767;
+    int clippedSamples = 0;
+    int totalSamples = audio.size();
+    
+    for (size_t i = 0; i < audio.size(); i++) {
+        int16_t sample = audio[i];
+        int16_t absSample = std::abs(sample);
+        
+        if (absSample > clipThreshold) {
+            clippedSamples++;
+            
+            // Apply soft clipping using cubic function
+            float normalized = static_cast<float>(sample) / 32768.0f;
+            
+            if (normalized > threshold) {
+                // Soft clipping for positive peaks
+                float excess = normalized - threshold;
+                float softClipped = threshold + excess * (1.0f - excess * excess * 0.5f);
+                audio[i] = static_cast<int16_t>(softClipped * 32768.0f);
+            } else if (normalized < -threshold) {
+                // Soft clipping for negative peaks
+                float excess = -normalized - threshold;
+                float softClipped = -(threshold + excess * (1.0f - excess * excess * 0.5f));
+                audio[i] = static_cast<int16_t>(softClipped * 32768.0f);
+            }
+        }
+    }
+    
+    float clippingPercentage = (static_cast<float>(clippedSamples) / totalSamples) * 100.0f;
+    std::cout << "   • Clipped samples: " << clippedSamples << " (" << clippingPercentage << "%)\n";
+    
+    if (clippingPercentage > 0.1f) {
+        std::cout << "   ⚠ Significant clipping detected - smoothing applied\n";
+    } else if (clippingPercentage > 0.01f) {
+        std::cout << "   ✓ Moderate clipping detected - smoothing applied\n";
+    } else {
+        std::cout << "   ✓ Minimal clipping detected - audio is clean\n";
+    }
+    
+    std::cout << "✅ Applied: Clipping reduction\n";
 }
 
 void AudioProcessor::applyHighPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate) {
