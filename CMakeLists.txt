@@ -4,6 +4,9 @@ project(AudioCleaner VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Optional OpenCL GPU acceleration
+option(ENABLE_OPENCL "Enable OpenCL GPU acceleration" OFF)
+
 # Try to detect and set compiler
 if(MSVC)
     set(CMAKE_CXX_FLAGS "/W4 /O2")
@@ -21,11 +24,25 @@ add_executable(audio_cleaner
     src/mp3_format.cpp
     src/ogg_format.cpp
     src/wma_format.cpp
+    src/audio_processor_backend.cpp
 )
 
 # Link math library on non-Windows systems
 if(NOT MSVC)
     target_link_libraries(audio_cleaner m)
+endif()
+
+# Add OpenCL support if enabled
+if(ENABLE_OPENCL)
+    find_package(OpenCL REQUIRED)
+    if(OpenCL_FOUND)
+        target_compile_definitions(audio_cleaner PRIVATE ENABLE_OPENCL)
+        target_link_libraries(audio_cleaner ${OpenCL_LIBRARIES})
+        target_include_directories(audio_cleaner PRIVATE ${OpenCL_INCLUDE_DIRS})
+        message(STATUS "OpenCL GPU acceleration enabled")
+    else()
+        message(WARNING "OpenCL requested but not found - building without GPU support")
+    endif()
 endif()
 
 # Add external library support for real MP3/OGG decoding

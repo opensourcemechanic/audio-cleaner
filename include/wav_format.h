@@ -26,6 +26,7 @@ private:
     std::ifstream file;
     WavHeader header;
     AudioFormat format;
+    std::streampos dataPosition;
     
 public:
     WavReader() = default;

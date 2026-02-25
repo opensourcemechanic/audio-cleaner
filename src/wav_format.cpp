@@ -10,10 +10,51 @@ bool WavReader::open(const std::string& filename) {
         return false;
     }
     
-    file.read(reinterpret_cast<char*>(&header), sizeof(WavHeader));
+    // Read RIFF header
+    char riff[4], wave[4];
+    uint32_t fileSize;
+    file.read(riff, 4);
+    file.read(reinterpret_cast<char*>(&fileSize), 4);
+    file.read(wave, 4);
     
-    if (strncmp(header.riff, "RIFF", 4) != 0 || strncmp(header.wave, "WAVE", 4) != 0) {
+    if (strncmp(riff, "RIFF", 4) != 0 || strncmp(wave, "WAVE", 4) != 0) {
         std::cerr << "Error: Invalid WAV file format in " << filename << std::endl;
+        close();
+        return false;
+    }
+    
+    // Read chunks until we find the format chunk
+    char chunkId[4];
+    uint32_t chunkSize;
+    bool foundFormat = false;
+    
+    while (!foundFormat && file.read(chunkId, 4)) {
+        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        
+        if (strncmp(chunkId, "fmt ", 4) == 0) {
+            // Read format chunk
+            file.read(reinterpret_cast<char*>(&header.audioFormat), 2);
+            file.read(reinterpret_cast<char*>(&header.numChannels), 2);
+            file.read(reinterpret_cast<char*>(&header.sampleRate), 4);
+            file.read(reinterpret_cast<char*>(&header.byteRate), 4);
+            file.read(reinterpret_cast<char*>(&header.blockAlign), 2);
+            file.read(reinterpret_cast<char*>(&header.bitsPerSample), 2);
+            
+            // Skip any remaining format bytes
+            if (chunkSize > 16) {
+                file.seekg(chunkSize - 16, std::ios::cur);
+            }
+            
+            foundFormat = true;
+            break;
+        } else {
+            // Skip this chunk
+            file.seekg(chunkSize, std::ios::cur);
+        }
+    }
+    
+    if (!foundFormat) {
+        std::cerr << "Error: Could not find format chunk in WAV file" << std::endl;
         close();
         return false;
     }
@@ -23,6 +64,30 @@ bool WavReader::open(const std::string& filename) {
         close();
         return false;
     }
+    
+    // Now find the data chunk
+    bool foundData = false;
+    while (!foundData && file.read(chunkId, 4)) {
+        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        
+        if (strncmp(chunkId, "data", 4) == 0) {
+            header.dataSize = chunkSize;
+            foundData = true;
+            break;
+        } else {
+            // Skip this chunk
+            file.seekg(chunkSize, std::ios::cur);
+        }
+    }
+    
+    if (!foundData) {
+        std::cerr << "Error: Could not find data chunk in WAV file" << std::endl;
+        close();
+        return false;
+    }
+    
+    // Store current position for reading
+    dataPosition = file.tellg();
     
     format = AudioFormat(header.sampleRate, header.numChannels, header.bitsPerSample, 
                         header.dataSize / (header.bitsPerSample / 8) / header.numChannels);
@@ -35,6 +100,9 @@ bool WavReader::read(std::vector<int16_t>& audioData) {
         std::cerr << "Error: WAV file not open" << std::endl;
         return false;
     }
+    
+    // Seek to data position
+    file.seekg(dataPosition);
     
     size_t samplesToRead = header.dataSize / sizeof(int16_t);
     audioData.resize(samplesToRead);

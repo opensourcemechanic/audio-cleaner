@@ -2,6 +2,9 @@
 #include <vector>
 #include <complex>
 #include <cstdint>
+#include <memory>
+
+class AudioProcessorBackend;
 
 class AudioProcessor {
 private:
@@ -9,9 +12,10 @@ private:
     int hopSize;
     std::vector<std::complex<float>> fftBuffer;
     std::vector<float> window;
-    std::vector<std::complex<float>> noiseSpectrum;
+    std::vector<float> noiseSpectrum;
     std::vector<std::complex<float>> adaptiveFilter;
     float learningRate;
+    std::unique_ptr<AudioProcessorBackend> backend;
     
     void fft(std::vector<std::complex<float>>& data);
     void ifft(std::vector<std::complex<float>>& data);
@@ -24,6 +28,7 @@ private:
     
 public:
     AudioProcessor(int fftSize = 1024);
+    AudioProcessor(int fftSize, std::unique_ptr<AudioProcessorBackend> processingBackend);
     
     void processEchoCancellation(std::vector<int16_t>& audio, const std::vector<int16_t>& reference);
     void processNoiseReduction(std::vector<int16_t>& audio);

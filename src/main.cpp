@@ -1,5 +1,6 @@
 #include "../include/audio_loader.h"
 #include "../include/audio_processor.h"
+#include "../include/audio_processor_backend.h"
 #include "../include/wav_format.h"
 #include "../include/mp3_format.h"
 #include "../include/ogg_format.h"
@@ -44,6 +45,8 @@ void printUsage(const char* programName) {
     std::cout << "  --fft-size <size>   FFT size for spectral analysis (128-65536, power of 2, default: 1024)\n";
     std::cout << "  --reduce-clipping   Smooth clipped audio peaks (default threshold: 95%)\n";
     std::cout << "  --clipping-threshold <threshold> Clipping threshold (0.8-0.99, default: 0.95)\n";
+    std::cout << "  --force-gpu         Force GPU acceleration (requires OpenCL)\n";
+    std::cout << "  --backend <type>    Force processing backend (cpu/opencl/auto)\n";
     std::cout << "  -f                  List supported formats\n";
     std::cout << "  -h                  Show this help\n\n";
     std::cout << "Supported formats: ";
@@ -78,6 +81,10 @@ void printUsage(const char* programName) {
     std::cout << "    # Smooth clipped audio peaks to reduce distortion\n\n";
     std::cout << "  " << programName << " -i heavily_clipped.wav -o smooth.wav --reduce-clipping --clipping-threshold 0.9\n";
     std::cout << "    # More aggressive clipping reduction at 90% threshold\n\n";
+    std::cout << "  " << programName << " -i long_audio.wav -o clean.wav --force-gpu\n";
+    std::cout << "    # Force GPU acceleration for faster processing\n\n";
+    std::cout << "  " << programName << " -i audio.wav -o clean.wav --backend opencl\n";
+    std::cout << "    # Use OpenCL backend explicitly\n\n";
     std::cout << "Technical Details:\n";
     std::cout << "  • FFT Size: 1024 samples with 75% overlap\n";
     std::cout << "  • Window: Hann window for smooth transitions\n";
@@ -98,6 +105,8 @@ int main(int argc, char* argv[]) {
     int fftSize = 1024;
     bool enableClippingReduction = false;
     float clippingThreshold = 0.95f;
+    bool forceGPU = false;
+    std::string backendType = "auto";
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -151,8 +160,8 @@ int main(int argc, char* argv[]) {
         }
         else if (arg == "--fft-size" && i + 1 < argc) {
             fftSize = std::stoi(argv[++i]);
-            // Validate FFT size (must be power of 2 and between 128 and 65536)
-            if (fftSize < 128 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
+            // Validate FFT size (must be power of 2 and between 64 and 65536)
+            if (fftSize < 64 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
                 std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
                 fftSize = 1024;
             }
@@ -166,6 +175,17 @@ int main(int argc, char* argv[]) {
             if (clippingThreshold < 0.8f || clippingThreshold > 0.99f) {
                 std::cerr << "Warning: Invalid clipping threshold " << clippingThreshold << ", using 0.95" << std::endl;
                 clippingThreshold = 0.95f;
+            }
+        }
+        else if (arg == "--force-gpu") {
+            forceGPU = true;
+        }
+        else if (arg == "--backend" && i + 1 < argc) {
+            backendType = argv[++i];
+            // Validate backend type
+            if (backendType != "cpu" && backendType != "opencl" && backendType != "auto") {
+                std::cerr << "Warning: Invalid backend type " << backendType << ", using auto" << std::endl;
+                backendType = "auto";
             }
         }
     }
@@ -221,7 +241,40 @@ int main(int argc, char* argv[]) {
     std::cout << inputFormat.numChannels << " channels, ";
     std::cout << "Format: " << loader.getFormat().bitsPerSample << "-bit\n";
     
-    AudioProcessor processor(fftSize);
+    // Calculate audio duration for smart backend selection
+    double audioDuration = static_cast<double>(audioData.size()) / (inputFormat.sampleRate * inputFormat.numChannels);
+    
+    // Create optimal backend based on duration and user preferences
+    std::unique_ptr<AudioProcessorBackend> backend;
+    AudioProcessorFactory::BackendType selectedBackend = AudioProcessorFactory::BackendType::AUTO;
+    
+    if (backendType == "cpu") {
+        selectedBackend = AudioProcessorFactory::BackendType::CPU;
+    } else if (backendType == "opencl") {
+        selectedBackend = AudioProcessorFactory::BackendType::OPENCL;
+    }
+    
+    backend = AudioProcessorFactory::createOptimalBackend(audioDuration, forceGPU);
+    
+    std::cout << "\n=== PROCESSING BACKEND ===\n";
+    std::cout << "   • Backend: " << backend->getBackendName();
+    if (backend->isGPUAccelerated()) {
+        std::cout << " (GPU Accelerated)";
+    }
+    std::cout << "\n";
+    std::cout << "   • Device: " << backend->getDeviceInfo() << "\n";
+    std::cout << "   • Audio Duration: " << audioDuration << " seconds (" << (audioDuration / 60.0) << " minutes)\n";
+    
+    if (audioDuration > 300.0) {
+        std::cout << "   • GPU acceleration: Auto-enabled for long audio (>5 minutes)\n";
+    } else if (forceGPU) {
+        std::cout << "   • GPU acceleration: Forced by user\n";
+    } else {
+        std::cout << "   • GPU acceleration: Not needed for short audio\n";
+    }
+    std::cout << "\n";
+    
+    AudioProcessor processor(fftSize, std::move(backend));
     processor.setLearningRate(learningRate);
     
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -258,7 +311,6 @@ int main(int argc, char* argv[]) {
         std::cout << "   • Limitations: Less effective for rapidly changing noise\n";
         std::cout << "\n";
         processor.processNoiseReduction(audioData);
-        std::cout << "✅ Applied: Noise reduction only\n";
     }
     
     // Apply low-frequency removal if enabled
