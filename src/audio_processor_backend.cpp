@@ -231,22 +231,12 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
     
     // Load and compile OpenCL kernels
     const char* kernelSource = R"CLC(
-    // Bit reversal helper function
-    int bitReverse(int n, int bits) {
-        int reversed = 0;
-        for (int i = 0; i < bits; i++) {
-            reversed = (reversed << 1) | (n & 1);
-            n >>= 1;
-        }
-        return reversed;
-    }
-    
-    // Cooley-Tukey FFT kernel
+    // Iterative Cooley-Tukey FFT kernel
     __kernel void fft(__global float2* data, const int N, const int direction) {
         int gid = get_global_id(0);
         if (gid >= N) return;
         
-        // Bit-reversal reordering
+        // Bit-reversal permutation
         int bits = 0;
         int temp = N;
         while (temp > 1) {
@@ -254,9 +244,14 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
             temp >>= 1;
         }
         
-        int reversed = bitReverse(gid, bits);
+        int reversed = 0;
+        int num = gid;
+        for (int i = 0; i < bits; i++) {
+            reversed = (reversed << 1) | (num & 1);
+            num >>= 1;
+        }
+        
         if (gid < reversed) {
-            // Swap elements for bit-reversal ordering
             float2 temp = data[gid];
             data[gid] = data[reversed];
             data[reversed] = temp;
@@ -264,9 +259,9 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
         
         barrier(CLK_GLOBAL_MEM_FENCE);
         
-        // Cooley-Tukey butterfly operations
+        // Cooley-Tukey iterative FFT
         for (int len = 2; len <= N; len <<= 1) {
-            float angle = (2.0f * M_PI * direction) / len;
+            float angle = direction * 2.0f * M_PI / len;
             float2 wlen = (float2)(cos(angle), sin(angle));
             
             for (int i = gid; i < N; i += len) {
@@ -275,11 +270,13 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
                     int u = i + j;
                     int v = i + j + len/2;
                     
-                    float2 u_val = data[u];
-                    float2 v_val = data[v] * w;
-                    
-                    data[u] = u_val + v_val;
-                    data[v] = u_val - v_val;
+                    if (v < N) {
+                        float2 u_val = data[u];
+                        float2 v_val = data[v] * w;
+                        
+                        data[u] = u_val + v_val;
+                        data[v] = u_val - v_val;
+                    }
                     
                     w = w * wlen;
                 }
@@ -288,9 +285,9 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
             barrier(CLK_GLOBAL_MEM_FENCE);
         }
         
-        // For inverse FFT, scale by 1/N
-        if (direction == -1) {
-            data[gid] = data[gid] / (float2)((float)N, (float)N);
+        // Scale for inverse FFT
+        if (direction < 0) {
+            data[gid] = data[gid] * (1.0f / N);
         }
     }
     
@@ -331,6 +328,12 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
     if (!impl->fftProgram) return false;
     
     if (clBuildProgram(impl->fftProgram, 1, &device, nullptr, nullptr, nullptr) != CL_SUCCESS) {
+        // Get build error log
+        size_t logSize;
+        clGetProgramBuildInfo(impl->fftProgram, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize);
+        std::vector<char> log(logSize);
+        clGetProgramBuildInfo(impl->fftProgram, device, CL_PROGRAM_BUILD_LOG, logSize, log.data(), nullptr);
+        std::cerr << "OpenCL kernel build failed: " << std::string(log.data()) << std::endl;
         return false;
     }
     
@@ -343,6 +346,7 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
 
 void OpenCLBackend::fft(std::vector<std::complex<float>>& data) {
     if (!impl->fftKernel) {
+        std::cerr << "OpenCL FFT kernel not available, falling back to CPU" << std::endl;
         // Fallback to CPU implementation
         CPUBackend cpu;
         cpu.fft(data);
@@ -376,6 +380,7 @@ void OpenCLBackend::fft(std::vector<std::complex<float>>& data) {
 
 void OpenCLBackend::ifft(std::vector<std::complex<float>>& data) {
     if (!impl->fftKernel) {
+        std::cerr << "OpenCL IFFT kernel not available, falling back to CPU" << std::endl;
         // Fallback to CPU implementation
         CPUBackend cpu;
         cpu.ifft(data);

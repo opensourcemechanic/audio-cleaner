@@ -9,8 +9,8 @@ const float PI = 3.14159265359f;
 AudioProcessor::AudioProcessor(int fftSize) : fftSize(fftSize), learningRate(0.01f) {
     // Validate FFT size (must be power of 2 and between 64 and 65536)
     if (fftSize < 64 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
-        std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
-        this->fftSize = 1024;
+        std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 512" << std::endl;
+        this->fftSize = 512;
     }
     
     hopSize = this->fftSize / 4; // 75% overlap
@@ -38,8 +38,8 @@ AudioProcessor::AudioProcessor(int fftSize, std::unique_ptr<AudioProcessorBacken
     : fftSize(fftSize), learningRate(0.01f), backend(std::move(processingBackend)) {
     // Validate FFT size (must be power of 2 and between 64 and 65536)
     if (fftSize < 64 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
-        std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
-        this->fftSize = 1024;
+        std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 512" << std::endl;
+        this->fftSize = 512;
     }
     
     hopSize = this->fftSize / 4; // 75% overlap
