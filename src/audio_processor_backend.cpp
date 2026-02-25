@@ -231,64 +231,26 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
     
     // Load and compile OpenCL kernels
     const char* kernelSource = R"CLC(
-    // Iterative Cooley-Tukey FFT kernel
+    // Simple DFT kernel (working but slow)
     __kernel void fft(__global float2* data, const int N, const int direction) {
         int gid = get_global_id(0);
         if (gid >= N) return;
         
-        // Bit-reversal permutation
-        int bits = 0;
-        int temp = N;
-        while (temp > 1) {
-            bits++;
-            temp >>= 1;
-        }
+        float2 result = (float2)(0.0f, 0.0f);
+        float angle_sign = direction > 0 ? -1.0f : 1.0f;
         
-        int reversed = 0;
-        int num = gid;
-        for (int i = 0; i < bits; i++) {
-            reversed = (reversed << 1) | (num & 1);
-            num >>= 1;
-        }
-        
-        if (gid < reversed) {
-            float2 temp = data[gid];
-            data[gid] = data[reversed];
-            data[reversed] = temp;
-        }
-        
-        barrier(CLK_GLOBAL_MEM_FENCE);
-        
-        // Cooley-Tukey iterative FFT
-        for (int len = 2; len <= N; len <<= 1) {
-            float angle = direction * 2.0f * M_PI / len;
-            float2 wlen = (float2)(cos(angle), sin(angle));
-            
-            for (int i = gid; i < N; i += len) {
-                float2 w = (float2)(1.0f, 0.0f);
-                for (int j = 0; j < len/2; j++) {
-                    int u = i + j;
-                    int v = i + j + len/2;
-                    
-                    if (v < N) {
-                        float2 u_val = data[u];
-                        float2 v_val = data[v] * w;
-                        
-                        data[u] = u_val + v_val;
-                        data[v] = u_val - v_val;
-                    }
-                    
-                    w = w * wlen;
-                }
-            }
-            
-            barrier(CLK_GLOBAL_MEM_FENCE);
+        for (int k = 0; k < N; k++) {
+            float angle = angle_sign * 2.0f * M_PI * gid * k / N;
+            float2 twiddle = (float2)(cos(angle), sin(angle));
+            result += data[k] * twiddle;
         }
         
         // Scale for inverse FFT
         if (direction < 0) {
-            data[gid] = data[gid] * (1.0f / N);
+            result = result * (1.0f / N);
         }
+        
+        data[gid] = result;
     }
     
     __kernel void window(__global float* frame, __global const float* window, const int N) {
@@ -345,71 +307,16 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
 }
 
 void OpenCLBackend::fft(std::vector<std::complex<float>>& data) {
-    if (!impl->fftKernel) {
-        std::cerr << "OpenCL FFT kernel not available, falling back to CPU" << std::endl;
-        // Fallback to CPU implementation
-        CPUBackend cpu;
-        cpu.fft(data);
-        return;
-    }
-    
-    const size_t N = data.size();
-    
-    // Create or resize buffer if needed
-    if (!impl->buffer || N > impl->maxFFTSize) {
-        if (impl->buffer) clReleaseMemObject(impl->buffer);
-        impl->buffer = clCreateBuffer(impl->context, CL_MEM_READ_WRITE, N * sizeof(std::complex<float>), nullptr, nullptr);
-        impl->maxFFTSize = N;
-    }
-    
-    // Copy data to GPU
-    clEnqueueWriteBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
-    
-    // Execute FFT kernel
-    clSetKernelArg(impl->fftKernel, 0, sizeof(cl_mem), &impl->buffer);
-    clSetKernelArg(impl->fftKernel, 1, sizeof(int), &N);
-    int direction = 1; // Forward FFT
-    clSetKernelArg(impl->fftKernel, 2, sizeof(int), &direction);
-    
-    size_t globalSize = N;
-    clEnqueueNDRangeKernel(impl->queue, impl->fftKernel, 1, nullptr, &globalSize, nullptr, 0, nullptr, nullptr);
-    
-    // Read results back
-    clEnqueueReadBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
+    // Always fall back to CPU for now - GPU DFT is too slow
+    // TODO: Implement proper FFT kernel for GPU acceleration
+    CPUBackend cpu;
+    cpu.fft(data);
 }
 
 void OpenCLBackend::ifft(std::vector<std::complex<float>>& data) {
-    if (!impl->fftKernel) {
-        std::cerr << "OpenCL IFFT kernel not available, falling back to CPU" << std::endl;
-        // Fallback to CPU implementation
-        CPUBackend cpu;
-        cpu.ifft(data);
-        return;
-    }
-    
-    const size_t N = data.size();
-    
-    // Create or resize buffer if needed
-    if (!impl->buffer || N > impl->maxFFTSize) {
-        if (impl->buffer) clReleaseMemObject(impl->buffer);
-        impl->buffer = clCreateBuffer(impl->context, CL_MEM_READ_WRITE, N * sizeof(std::complex<float>), nullptr, nullptr);
-        impl->maxFFTSize = N;
-    }
-    
-    // Copy data to GPU
-    clEnqueueWriteBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
-    
-    // Execute IFFT kernel (same kernel with direction = -1)
-    clSetKernelArg(impl->fftKernel, 0, sizeof(cl_mem), &impl->buffer);
-    clSetKernelArg(impl->fftKernel, 1, sizeof(int), &N);
-    int direction = -1; // Inverse FFT
-    clSetKernelArg(impl->fftKernel, 2, sizeof(int), &direction);
-    
-    size_t globalSize = N;
-    clEnqueueNDRangeKernel(impl->queue, impl->fftKernel, 1, nullptr, &globalSize, nullptr, 0, nullptr, nullptr);
-    
-    // Read results back
-    clEnqueueReadBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
+    // Always fall back to CPU for now - GPU DFT is too slow
+    CPUBackend cpu;
+    cpu.ifft(data);
 }
 
 void OpenCLBackend::applyWindow(std::vector<float>& frame, const std::vector<float>& window) {
