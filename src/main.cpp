@@ -276,11 +276,14 @@ int main(int argc, char* argv[]) {
     
     if (backendType == "cpu") {
         selectedBackend = AudioProcessorFactory::BackendType::CPU;
+        backend = AudioProcessorFactory::createBackend(selectedBackend);
     } else if (backendType == "opencl") {
         selectedBackend = AudioProcessorFactory::BackendType::OPENCL;
+        backend = AudioProcessorFactory::createBackend(selectedBackend);
+    } else {
+        // Auto selection based on duration and forceGPU flag
+        backend = AudioProcessorFactory::createOptimalBackend(audioDuration, forceGPU);
     }
-    
-    backend = AudioProcessorFactory::createOptimalBackend(audioDuration, forceGPU);
     
     std::cout << "\n=== PROCESSING BACKEND ===\n";
     std::cout << "   • Backend: " << backend->getBackendName();
