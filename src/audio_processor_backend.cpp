@@ -488,7 +488,7 @@ void OpenCLBackend::convolve(
 
 size_t OpenCLBackend::getOptimalFFTSize(size_t minSize) const {
     // GPU prefers larger FFT sizes for better utilization
-    size_t size = 1024; // Minimum good size for GPU
+    size_t size = 512; // Minimum good size for GPU
     while (size < minSize) size <<= 1;
     return size;
 }

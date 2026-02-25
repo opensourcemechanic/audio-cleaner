@@ -68,7 +68,7 @@ void printUsage(const char* programName) {
     std::cout << "  -l <learning_rate>  Learning rate for adaptive filter (0.001-0.1, default: 0.01)\n";
     std::cout << "  --low-freq <hz>     Remove low-frequency noise below specified Hz (20-500, default: 80)\n";
     std::cout << "  --normalize <db>    Normalize audio to target level in dBFS (-60 to 0, default: -6)\n";
-    std::cout << "  --fft-size <size>   FFT size for spectral analysis (128-65536, power of 2, default: 1024)\n";
+    std::cout << "  --fft-size <size>   FFT size for spectral analysis (128-65536, power of 2, default: 512)\n";
     std::cout << "  --reduce-clipping   Smooth clipped audio peaks (default threshold: 95%)\n";
     std::cout << "  --clipping-threshold <threshold> Clipping threshold (0.8-0.99, default: 0.95)\n";
     std::cout << "  --force-gpu         Force GPU acceleration (requires OpenCL)\n";
@@ -112,7 +112,7 @@ void printUsage(const char* programName) {
     std::cout << "  " << programName << " -i audio.wav -o clean.wav --backend opencl\n";
     std::cout << "    # Use OpenCL backend explicitly\n\n";
     std::cout << "Technical Details:\n";
-    std::cout << "  • FFT Size: 1024 samples with 75% overlap\n";
+    std::cout << "  • FFT Size: 512 samples with 75% overlap\n";
     std::cout << "  • Window: Hann window for smooth transitions\n";
     std::cout << "  • Echo Cancellation: Least Mean Squares (LMS) adaptive filter\n";
     std::cout << "  • Noise Reduction: Spectral subtraction with flooring\n\n";
@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
     bool enableLowFreqRemoval = false;
     float normalizeLevel = 0.0f; // 0 = disabled
     bool enableNormalization = false;
-    int fftSize = 1024;
+    int fftSize = 512;
     bool enableClippingReduction = false;
     float clippingThreshold = 0.95f;
     bool forceGPU = false;
@@ -188,8 +188,8 @@ int main(int argc, char* argv[]) {
             fftSize = std::stoi(argv[++i]);
             // Validate FFT size (must be power of 2 and between 64 and 65536)
             if (fftSize < 64 || fftSize > 65536 || (fftSize & (fftSize - 1)) != 0) {
-                std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 1024" << std::endl;
-                fftSize = 1024;
+                std::cerr << "Warning: Invalid FFT size " << fftSize << ", using 512" << std::endl;
+                fftSize = 512;
             }
         }
         else if (arg == "--reduce-clipping") {
@@ -329,7 +329,7 @@ int main(int argc, char* argv[]) {
     } else {
         std::cout << "🔧 NOISE REDUCTION ONLY:\n";
         std::cout << "   • Spectral Subtraction Algorithm:\n";
-        std::cout << "     - Converts audio to frequency domain using 1024-point FFT\n";
+        std::cout << "     - Converts audio to frequency domain using 512-point FFT\n";
         std::cout << "     - Uses 75% overlap windowing for smooth transitions\n";
         std::cout << "     - Estimates noise profile from first audio frames\n";
         std::cout << "     - Subtracts estimated noise from frequency spectrum\n";
