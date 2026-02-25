@@ -6,15 +6,19 @@
 #include <cctype>
 #include <fstream>
 
+// Conditional includes for FFmpeg support
+#ifdef HAVE_FFMPEG
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libswresample/swresample.h>
 }
+#endif
 
 // WMA format plugin using FFmpeg
 
+#ifdef HAVE_FFMPEG
 class WmaReader : public IAudioReader {
 private:
     AVFormatContext* formatContext;
@@ -92,3 +96,4 @@ public:
     
     int getPriority() const override { return 6; } // Medium priority
 };
+#endif // HAVE_FFMPEG

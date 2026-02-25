@@ -2,9 +2,22 @@
 #include "../include/audio_processor.h"
 #include "../include/audio_processor_backend.h"
 #include "../include/wav_format.h"
+
+#ifdef HAVE_MPG123
+#ifdef HAVE_LAME
 #include "../include/mp3_format.h"
+#endif
+#endif
+
+#ifdef HAVE_VORBIS
+#ifdef HAVE_OGG
 #include "../include/ogg_format.h"
+#endif
+#endif
+
+#ifdef HAVE_FFMPEG
 #include "../include/wma_format.h"
+#endif
 #include <iostream>
 #include <chrono>
 
@@ -13,9 +26,22 @@ void initializeFormats() {
     
     // Register built-in formats
     factory.registerFormat(std::make_unique<WavFormat>());
+    
+#ifdef HAVE_MPG123
+#ifdef HAVE_LAME
     factory.registerFormat(std::make_unique<Mp3Format>());
+#endif
+#endif
+
+#ifdef HAVE_VORBIS
+#ifdef HAVE_OGG
     factory.registerFormat(std::make_unique<OggFormat>());
+#endif
+#endif
+
+#ifdef HAVE_FFMPEG
     factory.registerFormat(std::make_unique<WmaFormat>());
+#endif
 }
 
 void printUsage(const char* programName) {

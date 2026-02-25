@@ -173,7 +173,7 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
     }
     
     for (int i = 0; i <= fftSize / 2; ++i) {
-        noiseSpectrum[i] = sqrtf(noiseSpectrum[i] / NOISE_FRAMES);
+        noiseSpectrum[i] = sqrtf(std::abs(noiseSpectrum[i]) / NOISE_FRAMES);
         noiseSpectrum[i] *= 0.5f;
     }
 }

@@ -16,16 +16,34 @@ endif()
 
 include_directories(include)
 
-add_executable(audio_cleaner
+# Always include core files
+set(CORE_SOURCES
     src/main.cpp
     src/audio_loader.cpp
     src/audio_processor.cpp
     src/wav_format.cpp
-    src/mp3_format.cpp
-    src/ogg_format.cpp
-    src/wma_format.cpp
     src/audio_processor_backend.cpp
 )
+
+# Add optional format sources based on library availability
+set(OPTIONAL_SOURCES "")
+
+if(WIN32)
+    if(MPG123_LIB AND LAME_LIB)
+        list(APPEND OPTIONAL_SOURCES src/mp3_format.cpp)
+    endif()
+    if(VORBIS_LIB AND OGG_LIB)
+        list(APPEND OPTIONAL_SOURCES src/ogg_format.cpp)
+    endif()
+    if(AVFORMAT_LIB AND AVCODEC_LIB AND AVUTIL_LIB AND SWRESAMPLE_LIB)
+        list(APPEND OPTIONAL_SOURCES src/wma_format.cpp)
+    endif()
+else()
+    # Linux - assume libraries are available
+    list(APPEND OPTIONAL_SOURCES src/mp3_format.cpp src/ogg_format.cpp src/wma_format.cpp)
+endif()
+
+add_executable(audio_cleaner ${CORE_SOURCES} ${OPTIONAL_SOURCES})
 
 # Link math library on non-Windows systems
 if(NOT MSVC)
@@ -46,10 +64,32 @@ if(ENABLE_OPENCL)
 endif()
 
 # Add external library support for real MP3/OGG decoding
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPG123 REQUIRED libmpg123)
-pkg_check_modules(VORBIS REQUIRED vorbisfile)
-find_library(LAME_LIB REQUIRED NAMES mp3lame)
+if(WIN32)
+    # Windows: Use find_library instead of pkg-config
+    # Add custom path for manual installation
+    set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};C:/AudioLibs")
+    
+    find_library(MPG123_LIB NAMES mpg123-0 mpg123 PATHS "C:/AudioLibs/lib")
+    find_library(VORBIS_LIB NAMES vorbisfile PATHS "C:/AudioLibs/lib")
+    find_library(VORBIS_ENC_LIB NAMES vorbisenc PATHS "C:/AudioLibs/lib")
+    find_library(OGG_LIB NAMES ogg PATHS "C:/AudioLibs/lib")
+    find_library(LAME_LIB NAMES mp3lame PATHS "C:/AudioLibs/lib")
+    
+    # Also check for headers
+    find_path(MPG123_INCLUDE_DIR mpg123.h PATHS "C:/AudioLibs/include")
+    find_path(LAME_INCLUDE_DIR lame/lame.h PATHS "C:/AudioLibs/include")
+    
+    if(NOT MPG123_LIB OR NOT VORBIS_LIB OR NOT LAME_LIB)
+        message(WARNING "Audio libraries not found - some formats may not be supported")
+        message(STATUS "To install audio libraries, place them in C:/AudioLibs/")
+    endif()
+else()
+    # Linux: Use pkg-config
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MPG123 REQUIRED libmpg123)
+    pkg_check_modules(VORBIS REQUIRED vorbisfile)
+    find_library(LAME_LIB REQUIRED NAMES mp3lame)
+endif()
 
 # Add FFmpeg support for WMA
 find_path(AVFORMAT_INCLUDE_DIR libavformat/avformat.h)
@@ -62,8 +102,47 @@ find_library(AVCODEC_LIB avcodec)
 find_library(AVUTIL_LIB avutil)
 find_library(SWRESAMPLE_LIB swresample)
 
-target_link_libraries(audio_cleaner ${MPG123_LIBRARIES} ${VORBIS_LIBRARIES} ${LAME_LIB} 
-                      ${AVFORMAT_LIB} ${AVCODEC_LIB} ${AVUTIL_LIB} ${SWRESAMPLE_LIB})
+# Link libraries that were found
+set(LINKED_LIBS "")
+
+# Add audio libraries if found and define macros
+if(WIN32)
+    if(MPG123_LIB)
+        list(APPEND LINKED_LIBS ${MPG123_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_MPG123)
+    endif()
+    if(VORBIS_LIB)
+        list(APPEND LINKED_LIBS ${VORBIS_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_VORBIS)
+    endif()
+    if(OGG_LIB)
+        list(APPEND LINKED_LIBS ${OGG_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_OGG)
+    endif()
+    if(LAME_LIB)
+        list(APPEND LINKED_LIBS ${LAME_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_LAME)
+    endif()
+else()
+    list(APPEND LINKED_LIBS ${MPG123_LIBRARIES} ${VORBIS_LIBRARIES} ${LAME_LIB})
+    target_compile_definitions(audio_cleaner PRIVATE HAVE_MPG123 HAVE_VORBIS HAVE_OGG HAVE_LAME)
+endif()
+
+# Add FFmpeg libraries if found and define macro
+set(FFMPEG_FOUND FALSE)
+if(AVFORMAT_LIB AND AVCODEC_LIB AND AVUTIL_LIB AND SWRESAMPLE_LIB)
+    list(APPEND LINKED_LIBS ${AVFORMAT_LIB} ${AVCODEC_LIB} ${AVUTIL_LIB} ${SWRESAMPLE_LIB})
+    target_compile_definitions(audio_cleaner PRIVATE HAVE_FFMPEG)
+    set(FFMPEG_FOUND TRUE)
+    message(STATUS "FFmpeg libraries found - WMA support enabled")
+else()
+    message(STATUS "FFmpeg libraries not found - WMA support disabled")
+endif()
+
+# Link all found libraries
+if(LINKED_LIBS)
+    target_link_libraries(audio_cleaner ${LINKED_LIBS})
+endif()
 
 install(TARGETS audio_cleaner
     RUNTIME DESTINATION bin
