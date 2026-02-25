@@ -308,8 +308,47 @@ void OpenCLBackend::fft(std::vector<std::complex<float>>& data) {
 }
 
 void OpenCLBackend::ifft(std::vector<std::complex<float>>& data) {
-    // Similar to FFT but with direction = -1 and scaling
-    fft(data); // Simplified - would implement proper IFFT
+    if (!impl->fftKernel) {
+        // Fallback to CPU implementation
+        CPUBackend cpu;
+        cpu.ifft(data);
+        return;
+    }
+    
+    const size_t N = data.size();
+    
+    // Conjugate input
+    for (auto& val : data) {
+        val = std::conj(val);
+    }
+    
+    // Create or resize buffer if needed
+    if (!impl->buffer || N > impl->maxFFTSize) {
+        if (impl->buffer) clReleaseMemObject(impl->buffer);
+        impl->buffer = clCreateBuffer(impl->context, CL_MEM_READ_WRITE, N * sizeof(std::complex<float>), nullptr, nullptr);
+        impl->maxFFTSize = N;
+    }
+    
+    // Copy data to GPU
+    clEnqueueWriteBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
+    
+    // Execute FFT kernel (forward FFT on conjugated data)
+    clSetKernelArg(impl->fftKernel, 0, sizeof(cl_mem), &impl->buffer);
+    clSetKernelArg(impl->fftKernel, 1, sizeof(int), &N);
+    int direction = 1; // Forward FFT (on conjugated data = inverse)
+    clSetKernelArg(impl->fftKernel, 2, sizeof(int), &direction);
+    
+    size_t globalSize = N;
+    clEnqueueNDRangeKernel(impl->queue, impl->fftKernel, 1, nullptr, &globalSize, nullptr, 0, nullptr, nullptr);
+    
+    // Read results back
+    clEnqueueReadBuffer(impl->queue, impl->buffer, CL_TRUE, 0, N * sizeof(std::complex<float>), data.data(), 0, nullptr, nullptr);
+    
+    // Conjugate output and scale
+    const float scale = 1.0f / N;
+    for (auto& val : data) {
+        val = std::conj(val) * scale;
+    }
 }
 
 void OpenCLBackend::applyWindow(std::vector<float>& frame, const std::vector<float>& window) {
