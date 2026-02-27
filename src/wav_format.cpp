@@ -1,7 +1,37 @@
 #include "../include/wav_format.h"
+#include <fstream>
 #include <iostream>
 #include <cstring>
 #include <algorithm>
+
+// Helper functions for little-endian reading (WAV files are little-endian)
+uint16_t readLE16(std::ifstream& file) {
+    uint8_t bytes[2];
+    file.read(reinterpret_cast<char*>(bytes), 2);
+    return bytes[0] | (bytes[1] << 8);
+}
+
+uint32_t readLE32(std::ifstream& file) {
+    uint8_t bytes[4];
+    file.read(reinterpret_cast<char*>(bytes), 4);
+    return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+}
+
+// Helper functions for little-endian writing
+void writeLE16(std::ofstream& file, uint16_t value) {
+    uint8_t bytes[2] = {static_cast<uint8_t>(value & 0xFF), static_cast<uint8_t>((value >> 8) & 0xFF)};
+    file.write(reinterpret_cast<char*>(bytes), 2);
+}
+
+void writeLE32(std::ofstream& file, uint32_t value) {
+    uint8_t bytes[4] = {
+        static_cast<uint8_t>(value & 0xFF),
+        static_cast<uint8_t>((value >> 8) & 0xFF),
+        static_cast<uint8_t>((value >> 16) & 0xFF),
+        static_cast<uint8_t>((value >> 24) & 0xFF)
+    };
+    file.write(reinterpret_cast<char*>(bytes), 4);
+}
 
 bool WavReader::open(const std::string& filename) {
     file.open(filename, std::ios::binary);
@@ -14,7 +44,7 @@ bool WavReader::open(const std::string& filename) {
     char riff[4], wave[4];
     uint32_t fileSize;
     file.read(riff, 4);
-    file.read(reinterpret_cast<char*>(&fileSize), 4);
+    fileSize = readLE32(file);
     file.read(wave, 4);
     
     if (strncmp(riff, "RIFF", 4) != 0 || strncmp(wave, "WAVE", 4) != 0) {
@@ -29,16 +59,16 @@ bool WavReader::open(const std::string& filename) {
     bool foundFormat = false;
     
     while (!foundFormat && file.read(chunkId, 4)) {
-        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        chunkSize = readLE32(file);
         
         if (strncmp(chunkId, "fmt ", 4) == 0) {
             // Read format chunk
-            file.read(reinterpret_cast<char*>(&header.audioFormat), 2);
-            file.read(reinterpret_cast<char*>(&header.numChannels), 2);
-            file.read(reinterpret_cast<char*>(&header.sampleRate), 4);
-            file.read(reinterpret_cast<char*>(&header.byteRate), 4);
-            file.read(reinterpret_cast<char*>(&header.blockAlign), 2);
-            file.read(reinterpret_cast<char*>(&header.bitsPerSample), 2);
+            header.audioFormat = readLE16(file);
+            header.numChannels = readLE16(file);
+            header.sampleRate = readLE32(file);
+            header.byteRate = readLE32(file);
+            header.blockAlign = readLE16(file);
+            header.bitsPerSample = readLE16(file);
             
             // Skip any remaining format bytes
             if (chunkSize > 16) {
@@ -68,7 +98,7 @@ bool WavReader::open(const std::string& filename) {
     // Now find the data chunk
     bool foundData = false;
     while (!foundData && file.read(chunkId, 4)) {
-        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        chunkSize = readLE32(file);
         
         if (strncmp(chunkId, "data", 4) == 0) {
             header.dataSize = chunkSize;
@@ -143,24 +173,20 @@ bool WavWriter::open(const std::string& filename, const AudioFormat& fmt) {
         return false;
     }
     
-    // Write placeholder header
-    WavHeader header;
-    strncpy(header.riff, "RIFF", 4);
-    strncpy(header.wave, "WAVE", 4);
-    strncpy(header.fmt, "fmt ", 4);
-    strncpy(header.data, "data", 4);
-    
-    header.fmtSize = 16;
-    header.audioFormat = 1; // PCM
-    header.numChannels = format.numChannels;
-    header.sampleRate = format.sampleRate;
-    header.bitsPerSample = format.bitsPerSample;
-    header.blockAlign = header.numChannels * header.bitsPerSample / 8;
-    header.byteRate = header.sampleRate * header.blockAlign;
-    header.dataSize = 0; // Will be updated when closing
-    header.fileSize = 0; // Will be updated when closing
-    
-    file.write(reinterpret_cast<char*>(&header), sizeof(WavHeader));
+    // Write placeholder header using little-endian functions
+    file.write("RIFF", 4);
+    writeLE32(file, 0); // fileSize placeholder
+    file.write("WAVE", 4);
+    file.write("fmt ", 4);
+    writeLE32(file, 16); // fmtSize
+    writeLE16(file, 1); // audioFormat (PCM)
+    writeLE16(file, format.numChannels);
+    writeLE32(file, format.sampleRate);
+    writeLE32(file, format.sampleRate * format.numChannels * format.bitsPerSample / 8); // byteRate
+    writeLE16(file, format.numChannels * format.bitsPerSample / 8); // blockAlign
+    writeLE16(file, format.bitsPerSample);
+    file.write("data", 4);
+    writeLE32(file, 0); // dataSize placeholder
     return true;
 }
 
@@ -177,39 +203,24 @@ bool WavWriter::write(const std::vector<int16_t>& audioData) {
 }
 
 void WavWriter::close() {
-    if (!file.is_open()) return;
-    
-    // Update header with actual sizes
-    std::streampos currentPos = file.tellp();
-    uint32_t dataSize = static_cast<std::streamoff>(currentPos) - sizeof(WavHeader);
-    uint32_t fileSize = static_cast<std::streamoff>(currentPos) - 8;
-    
-    // Go back to beginning and read existing header
-    file.seekp(0);
-    WavHeader header;
-    // We need to read what we already wrote, so temporarily switch to read mode
-    file.close();
-    std::ifstream inFile(file_name, std::ios::binary);
-    if (inFile.is_open()) {
-        inFile.read(reinterpret_cast<char*>(&header), sizeof(WavHeader));
-        inFile.close();
-    }
-    
-    // Update header fields
-    header.dataSize = dataSize;
-    header.fileSize = fileSize;
-    
-    // Reopen for writing and update header
-    file.open(file_name, std::ios::binary | std::ios::in | std::ios::out);
-    if (file.is_open()) {
-        file.seekp(0);
-        file.write(reinterpret_cast<char*>(&header), sizeof(WavHeader));
-        file.close();
-    }
+if (!file.is_open()) return;
+
+// Update header with actual sizes
+std::streampos currentPos = file.tellp();
+uint32_t dataSize = static_cast<std::streamoff>(currentPos) - 44; // 44 bytes for standard WAV header
+uint32_t fileSize = static_cast<std::streamoff>(currentPos) - 8;
+
+// Go back and update the size fields
+file.seekp(4);  // Position after "RIFF"
+writeLE32(file, fileSize);
+file.seekp(40); // Position after "data"
+writeLE32(file, dataSize);
+
+file.close();
 }
 
 bool WavWriter::canHandle(const std::string& filename) const {
-    std::string ext = filename.substr(filename.find_last_of('.') + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    return ext == "wav" || ext == "wave";
+std::string ext = filename.substr(filename.find_last_of('.') + 1);
+std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+return ext == "wav" || ext == "wave";
 }
