@@ -1,13 +1,183 @@
 # Audio Cleaner
 
-A fast C++ program with plugin architecture for processing audio files with echo cancellation and background noise reduction capabilities.
+An advanced audio processing application with GPU acceleration support for noise reduction, echo cancellation, and audio restoration.
 
 ## Features
 
-- **Plugin Architecture**: Extensible format support through plugin system
-- **Echo Cancellation**: Uses adaptive filtering (LMS algorithm) to remove echoes
-- **Noise Reduction**: Implements spectral subtraction for background noise removal
-- **Multi-format Support**: WAV (full), MP3/OGG (framework ready)
+- **🔧 Noise Reduction**: Intelligent spectral subtraction with quietest-section noise estimation
+- **🎯 Echo Cancellation**: Least Mean Squares (LMS) adaptive filtering
+- **📊 Clipping Reduction**: Smooth clipped audio peaks with adjustable thresholds
+- **🚀 GPU Acceleration**: OpenCL backend for high-performance processing
+- **🎵 Multiple Formats**: Support for WAV, MP3, WMA (with conditional compilation)
+- **⚡ Optimized FFT**: 512-point FFT with 75% overlap for fast processing
+- **🔍 Cross-Platform**: Windows and Linux compatibility with proper endianness handling
+
+## Performance
+
+- **Fast Processing**: ~9 minutes for 24-minute audio files
+- **GPU Acceleration**: OpenCL support for AMD/NVIDIA GPUs
+- **Intelligent Algorithms**: Smart noise estimation reduces over-processing
+- **Memory Efficient**: Optimized buffer management and streaming
+
+## Quick Start
+
+### Windows
+
+```powershell
+# Build the application
+.\build_windows.ps1
+
+# Process audio with noise reduction
+.\build-windows\audio_cleaner.exe -i input.wav -o clean.wav
+
+# Force GPU acceleration
+.\build-windows\audio_cleaner.exe -i input.wav -o clean.wav --force-gpu
+
+# Use specific backend
+.\build-windows\audio_cleaner.exe -i input.wav -o clean.wav --backend cpu
+```
+
+### Linux
+
+```bash
+# Build with CMake
+mkdir build && cd build
+cmake ..
+make
+
+# Process audio
+./audio_cleaner -i input.wav -o clean.wav
+```
+
+## Usage Examples
+
+```bash
+# Basic noise reduction
+audio_cleaner -i noisy.wav -o clean.wav
+
+# Echo cancellation with reference
+audio_cleaner -i noisy.wav -r reference.wav -o clean.wav
+
+# Reduce clipping in audio
+audio_cleaner -i clipped.wav -o smooth.wav --reduce-clipping
+
+# Studio quality processing
+audio_cleaner -i input.wav -o output.wav --fft-size 4096
+
+# GPU acceleration for long files
+audio_cleaner -i long_audio.wav -o clean.wav --force-gpu
+```
+
+## Algorithm Details
+
+### Noise Reduction
+- **Intelligent Noise Estimation**: Searches first 30 seconds for quietest frames
+- **Spectral Subtraction**: Conservative parameters (ALPHA=0.3, BETA=0.3)
+- **Window Function**: Hann window with 75% overlap
+- **FFT Processing**: 512-point FFT with O(N log N) algorithm
+
+### Echo Cancellation
+- **Adaptive Filtering**: LMS algorithm with configurable learning rate
+- **Reference Signal**: Optional reference input for better echo removal
+- **Convergence**: Fast convergence with stability guarantees
+
+### Audio Quality
+- **Sample Rate**: Supports 8kHz to 192kHz
+- **Bit Depth**: 16-bit PCM processing
+- **Channels**: Mono and stereo support
+- **Formats**: WAV, MP3, WMA (conditional)
+
+## Technical Architecture
+
+### Backend System
+- **CPU Backend**: Direct FFT implementation using Cooley-Tukey algorithm
+- **OpenCL Backend**: GPU acceleration with fallback to CPU
+- **Auto Selection**: Intelligent backend selection based on file size and hardware
+
+### Cross-Platform Compatibility
+- **Endianness Handling**: Explicit little-endian WAV file processing
+- **Memory Management**: Proper alignment and buffer management
+- **Floating-Point**: Consistent numerical behavior across platforms
+
+## Build Requirements
+
+### Windows
+- **Compiler**: MinGW-w64 or Visual Studio Build Tools
+- **Dependencies**: OpenCL (CUDA Toolkit), optional audio libraries
+- **Build Script**: `build_windows.ps1` for automated setup
+
+### Linux
+- **Compiler**: GCC or Clang
+- **Dependencies**: OpenCL development headers, audio libraries
+- **Build System**: CMake
+
+## Configuration
+
+### FFT Size Options
+- **128**: Fast processing, lower frequency resolution
+- **512**: Default (balanced speed and quality)
+- **1024**: Better frequency resolution
+- **4096**: Studio quality (slower)
+
+### Backend Selection
+- **auto**: Automatic selection based on file size
+- **cpu**: Force CPU processing
+- **opencl**: Force GPU acceleration
+
+## Troubleshooting
+
+### Windows Audio Distortion
+- **Fixed**: Proper endianness handling for WAV files
+- **Solution**: Explicit little-endian byte order processing
+
+### GPU Acceleration Issues
+- **Fallback**: Automatically falls back to CPU if GPU unavailable
+- **Compatibility**: Supports AMD and NVIDIA OpenCL devices
+
+### Over-Processing
+- **Solution**: Intelligent noise estimation with conservative parameters
+- **Result**: Natural sound with minimal artifacts
+
+## Development
+
+### Code Quality
+- **Memory Safety**: Proper bounds checking and buffer management
+- **Error Handling**: Comprehensive error reporting and fallbacks
+- **Testing**: Extensive testing on various audio formats and platforms
+
+### Performance Optimization
+- **FFT Algorithm**: O(N log N) Cooley-Tukey implementation
+- **Memory Usage**: Efficient buffer reuse and streaming
+- **GPU Utilization**: Optimized OpenCL kernels for audio processing
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Attribution
+
+**Written by Brian Nitz** using:
+- **Windsurf** with SWE-1.5
+- **Claude** (Anthropic) AI assistant
+- **Development Period**: February 2026
+
+### Key Development Contributions
+- Cross-platform audio processing compatibility
+- Intelligent noise estimation algorithms
+- GPU acceleration with OpenCL backend
+- Windows endianness fixes for audio quality
+- Performance optimization and backend architecture
+
+## Acknowledgments
+
+- **DSP Algorithms**: Based on textbook spectral subtraction and adaptive filtering
+- **OpenCL**: GPU acceleration framework
+- **Audio Libraries**: Conditional support for various audio codecs
+- **Build System**: CMake cross-platform build configuration
+
+---
+
+For more information, bug reports, or feature requests, please refer to the project documentation or create an issue in the repository.
 - **Real-time Processing**: Optimized for performance with FFT-based processing
 - **Cross-format Processing**: Convert between formats while processing
 - **16-bit PCM Support**: Works with standard audio formats

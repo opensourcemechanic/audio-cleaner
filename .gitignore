@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-windows/
 *.o
 *.exe
 *.out
@@ -7,6 +8,13 @@ build/
 
 # Compiled binaries
 audio_cleaner
+
+# Test output files
+test_*.wav
+test_*.mp3
+*_fixed.wav
+*_noise.wav
+*_debug.wav
 
 # IDE files
 .vscode/
