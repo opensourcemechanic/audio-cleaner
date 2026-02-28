@@ -147,40 +147,85 @@ void AudioProcessor::applyWindow(std::vector<float>& frame) {
 }
 
 void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
-    const int NOISE_FRAMES = 3;
+    std::cout << "  🔍 Starting intelligent noise estimation..." << std::endl;
+    const int NOISE_FRAMES = 5;  // Analyze more frames for better noise profile
+    const int SEARCH_WINDOW_SECONDS = 30;  // Look within first 30 seconds
+    const int QUIETEST_SECTIONS = 3;  // Use 3 quietest sections for noise estimation
+    
     std::vector<float> frame(fftSize, 0.0f);
     std::vector<std::complex<float>> spectrum(fftSize);
     
     std::fill(noiseSpectrum.begin(), noiseSpectrum.end(), 0.0f);
     
-    for (int frameNum = 0; frameNum < NOISE_FRAMES && frameNum * fftSize / 2 < static_cast<int>(audio.size()); ++frameNum) {
-        for (int i = 0; i < fftSize && frameNum * fftSize / 2 + i < static_cast<int>(audio.size()); ++i) {
-            frame[i] = static_cast<float>(audio[frameNum * fftSize / 2 + i]) / 32768.0f;
+    // Calculate frame metrics to find quietest sections
+    std::vector<std::pair<int, float>> frameEnergies;  // (frameIndex, energy)
+    
+    int totalFrames = (audio.size() - fftSize) / (fftSize / 4) + 1;
+    int searchFrames = std::min(totalFrames, SEARCH_WINDOW_SECONDS * 44100 / (fftSize / 4));
+    
+    for (int frameNum = 0; frameNum < searchFrames; ++frameNum) {
+        int frameStart = frameNum * fftSize / 4;
+        float frameEnergy = 0.0f;
+        
+        // Calculate frame energy
+        for (int i = 0; i < fftSize && frameStart + i < static_cast<int>(audio.size()); ++i) {
+            float sample = static_cast<float>(audio[frameStart + i]) / 32768.0f;
+            frameEnergy += sample * sample;
+        }
+        frameEnergy /= fftSize;  // Average energy
+        
+        frameEnergies.push_back({frameNum, frameEnergy});
+    }
+    
+    // Sort by energy to find quietest frames
+    std::sort(frameEnergies.begin(), frameEnergies.end(), 
+              [](const auto& a, const auto& b) { return a.second < b.second; });
+    
+    // Use the quietest sections for noise estimation
+    int noiseFramesUsed = 0;
+    for (int i = 0; i < QUIETEST_SECTIONS && i < static_cast<int>(frameEnergies.size()) && noiseFramesUsed < NOISE_FRAMES; ++i) {
+        int frameNum = frameEnergies[i].first;
+        int frameStart = frameNum * fftSize / 4;
+        
+        // Skip frames that are too close to each other
+        if (i > 0 && abs(frameNum - frameEnergies[i-1].first) < 10) continue;
+        
+        // Process this quiet frame
+        for (int j = 0; j < fftSize && frameStart + j < static_cast<int>(audio.size()); ++j) {
+            frame[j] = static_cast<float>(audio[frameStart + j]) / 32768.0f;
         }
         
         applyWindow(frame);
         
-        for (int i = 0; i < fftSize; ++i) {
-            spectrum[i] = std::complex<float>(frame[i], 0);
+        for (int j = 0; j < fftSize; ++j) {
+            spectrum[j] = std::complex<float>(frame[j], 0);
         }
         
         fft(spectrum);
         
-        for (int i = 0; i <= fftSize / 2; ++i) {
-            float magnitude = std::abs(spectrum[i]);
-            noiseSpectrum[i] += magnitude * magnitude;
+        for (int j = 0; j <= fftSize / 2; ++j) {
+            float magnitude = std::abs(spectrum[j]);
+            noiseSpectrum[j] += magnitude * magnitude;
+        }
+        
+        noiseFramesUsed++;
+        std::cout << "  📊 Using quiet frame at " << (frameStart * 1000.0f / 44100) << "ms (energy: " << frameEnergies[i].second << ")" << std::endl;
+    }
+    
+    // Average the noise spectrum
+    for (int i = 0; i <= fftSize / 2; ++i) {
+        if (noiseFramesUsed > 0) {
+            noiseSpectrum[i] = sqrtf(std::abs(noiseSpectrum[i]) / noiseFramesUsed);
+            noiseSpectrum[i] *= 0.3f;  // Conservative scaling
         }
     }
     
-    for (int i = 0; i <= fftSize / 2; ++i) {
-        noiseSpectrum[i] = sqrtf(std::abs(noiseSpectrum[i]) / NOISE_FRAMES);
-        noiseSpectrum[i] *= 0.5f;
-    }
+    std::cout << "  🔍 Noise estimation: Used " << noiseFramesUsed << " quietest frames from first " << SEARCH_WINDOW_SECONDS << " seconds" << std::endl;
 }
 
 void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spectrum) {
-    const float ALPHA = 0.8f;  // Much more conservative
-    const float BETA = 0.1f;   // Higher floor to preserve more signal
+    const float ALPHA = 0.3f;  // Much more conservative - only 30% subtraction
+    const float BETA = 0.3f;   // Higher floor - preserve 30% of original signal
     
     if (backend) {
         // Convert noiseSpectrum to float for backend
