@@ -156,17 +156,32 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Attribution
 
-**Written by Brian Nitz** using:
-- **Windsurf** with SWE-1.5
-- **Claude** (Anthropic) AI assistant
+**Developed by Brian Nitz** with implementation assistance from:
+- **Windsurf** IDE with SWE-1.5
+- **Claude** (Anthropic) AI assistant for code implementation
 - **Development Period**: February 2026
 
-### Key Development Contributions
-- Cross-platform audio processing compatibility
-- Intelligent noise estimation algorithms
-- GPU acceleration with OpenCL backend
-- Windows endianness fixes for audio quality
-- Performance optimization and backend architecture
+### Development Approach
+This project represents a **collaborative development** process:
+
+**Brian Nitz (User) Contributions:**
+- Architecture design and performance strategy
+- FFT size optimization (512-point default)
+- GPU acceleration architecture and backend system
+- Performance requirements and debugging direction
+- Algorithm selection and optimization goals
+- Cross-platform compatibility requirements
+- Build system design and testing
+
+**AI Assistant (Claude) Contributions:**
+- Code implementation and debugging
+- Endianness fix for Windows audio distortion
+- Intelligent noise estimation algorithm implementation
+- Conservative spectral subtraction parameter tuning
+- Memory safety fixes and error handling
+- Cross-platform compatibility code implementation
+
+The performance improvements and architectural decisions were **user-driven** based on domain knowledge and requirements, with AI providing technical implementation and problem-solving support.
 
 ## Acknowledgments
 
