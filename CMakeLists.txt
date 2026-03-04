@@ -28,17 +28,7 @@ set(CORE_SOURCES
 # Add optional format sources based on library availability
 set(OPTIONAL_SOURCES "")
 
-if(WIN32)
-    if(MPG123_LIB AND LAME_LIB)
-        list(APPEND OPTIONAL_SOURCES src/mp3_format.cpp)
-    endif()
-    if(VORBIS_LIB AND OGG_LIB)
-        list(APPEND OPTIONAL_SOURCES src/ogg_format.cpp)
-    endif()
-    if(AVFORMAT_LIB AND AVCODEC_LIB AND AVUTIL_LIB AND SWRESAMPLE_LIB)
-        list(APPEND OPTIONAL_SOURCES src/wma_format.cpp)
-    endif()
-else()
+if(NOT WIN32)
     # Linux - assume libraries are available
     list(APPEND OPTIONAL_SOURCES src/mp3_format.cpp src/ogg_format.cpp src/wma_format.cpp)
 endif()
@@ -107,21 +97,19 @@ set(LINKED_LIBS "")
 
 # Add audio libraries if found and define macros
 if(WIN32)
-    if(MPG123_LIB)
-        list(APPEND LINKED_LIBS ${MPG123_LIB})
-        target_compile_definitions(audio_cleaner PRIVATE HAVE_MPG123)
+    if(MPG123_LIB AND MPG123_INCLUDE_DIR AND LAME_LIB AND LAME_INCLUDE_DIR)
+        target_sources(audio_cleaner PRIVATE src/mp3_format.cpp)
+        list(APPEND LINKED_LIBS ${MPG123_LIB} ${LAME_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_MPG123 HAVE_LAME)
+        target_include_directories(audio_cleaner PRIVATE ${MPG123_INCLUDE_DIR} ${LAME_INCLUDE_DIR})
     endif()
-    if(VORBIS_LIB)
-        list(APPEND LINKED_LIBS ${VORBIS_LIB})
-        target_compile_definitions(audio_cleaner PRIVATE HAVE_VORBIS)
+    if(VORBIS_LIB AND OGG_LIB)
+        target_sources(audio_cleaner PRIVATE src/ogg_format.cpp)
+        list(APPEND LINKED_LIBS ${VORBIS_LIB} ${OGG_LIB})
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_VORBIS HAVE_OGG)
     endif()
-    if(OGG_LIB)
-        list(APPEND LINKED_LIBS ${OGG_LIB})
-        target_compile_definitions(audio_cleaner PRIVATE HAVE_OGG)
-    endif()
-    if(LAME_LIB)
-        list(APPEND LINKED_LIBS ${LAME_LIB})
-        target_compile_definitions(audio_cleaner PRIVATE HAVE_LAME)
+    if(AVFORMAT_LIB AND AVCODEC_LIB AND AVUTIL_LIB AND SWRESAMPLE_LIB)
+        target_sources(audio_cleaner PRIVATE src/wma_format.cpp)
     endif()
 else()
     list(APPEND LINKED_LIBS ${MPG123_LIBRARIES} ${VORBIS_LIBRARIES} ${LAME_LIB})
@@ -142,6 +130,17 @@ endif()
 # Link all found libraries
 if(LINKED_LIBS)
     target_link_libraries(audio_cleaner ${LINKED_LIBS})
+endif()
+
+# Copy required DLLs to build directory on Windows
+if(WIN32)
+    if(MPG123_LIB AND LAME_LIB)
+        add_custom_command(TARGET audio_cleaner POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            C:/AudioLibs/lib/mpg123.dll
+            C:/AudioLibs/lib/libmp3lame.dll
+            $<TARGET_FILE_DIR:audio_cleaner>)
+    endif()
 endif()
 
 install(TARGETS audio_cleaner
