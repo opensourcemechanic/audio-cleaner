@@ -526,9 +526,20 @@ void AudioProcessor::normalizeAudio(std::vector<int16_t>& audio, float targetLev
     float gainDb = targetLevel - currentPeakDb;
     float gainLinear = powf(10.0f, gainDb / 20.0f);
     
+    // Debug output
+    std::cout << "   • Current peak: " << currentPeakDb << " dBFS\n";
+    std::cout << "   • Required gain: " << gainDb << " dB (" << gainLinear << "x)\n";
+    
     // Apply gain with limiting to prevent clipping
-    const float maxGain = 20.0f; // Limit maximum gain to prevent excessive amplification
+    const float maxGain = 100.0f; // Limit maximum gain to prevent excessive amplification (100x = 40dB)
+    float originalGain = gainLinear;
     gainLinear = std::min(gainLinear, maxGain);
+    
+    if (gainLinear != originalGain) {
+        std::cout << "   • Gain limited to: " << maxGain << "x (" << (20.0f * log10f(maxGain)) << " dB)\n";
+    } else {
+        std::cout << "   • Applied gain: " << gainLinear << "x\n";
+    }
     
     // Apply gain to all samples
     for (size_t i = 0; i < audio.size(); ++i) {

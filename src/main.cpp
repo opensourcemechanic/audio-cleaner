@@ -171,13 +171,26 @@ int main(int argc, char* argv[]) {
             // Validate cutoff range (20 Hz - 500 Hz)
             lowFreqCutoff = std::max(20.0f, std::min(500.0f, lowFreqCutoff));
         }
-        else if (arg == "--normalize") {
-            if (i + 1 < argc && argv[i + 1][0] != '-') {
-                // Next argument is a number, use it as target level
-                normalizeLevel = std::stof(argv[++i]);
-                enableNormalization = true;
+        else if (arg.find("--normalize") == 0) {
+            if (arg.find('=') != std::string::npos) {
+                // Value provided with equals sign: --normalize=-1
+                std::string value = arg.substr(arg.find('=') + 1);
+                normalizeLevel = std::stof(value);
                 // Validate level range (-60 to 0 dB)
-                normalizeLevel = std::max(-60.0f, std::min(0.0f, normalizeLevel));
+                if (normalizeLevel < -60.0f || normalizeLevel > 0.0f) {
+                    std::cerr << "Warning: Invalid normalize level " << normalizeLevel << " dBFS (valid range: -60 to 0 dBFS), using default -6 dBFS" << std::endl;
+                    normalizeLevel = -6.0f;
+                }
+                enableNormalization = true;
+            } else if (i + 1 < argc && argv[i + 1][0] != '-') {
+                // Next argument is a number: --normalize -1
+                normalizeLevel = std::stof(argv[++i]);
+                // Validate level range (-60 to 0 dB)
+                if (normalizeLevel < -60.0f || normalizeLevel > 0.0f) {
+                    std::cerr << "Warning: Invalid normalize level " << normalizeLevel << " dBFS (valid range: -60 to 0 dBFS), using default -6 dBFS" << std::endl;
+                    normalizeLevel = -6.0f;
+                }
+                enableNormalization = true;
             } else {
                 // No value provided, use default -6dB
                 normalizeLevel = -6.0f;
