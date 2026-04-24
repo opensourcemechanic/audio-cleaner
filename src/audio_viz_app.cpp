@@ -1,5 +1,6 @@
 #include "../include/audio_viz_app.h"
 #include "../include/meta_reader.h"
+#include "../include/audio_loader.h"
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -20,60 +21,22 @@
 
 static const float PI = 3.14159265359f;
 
-// ---------------------------------------------------------------------------
-// Simple WAV loader (16-bit PCM only, little-endian)
-// ---------------------------------------------------------------------------
-static uint16_t readLE16(std::ifstream& f) {
-    uint8_t b[2]; f.read(reinterpret_cast<char*>(b), 2);
-    return static_cast<uint16_t>(b[0] | (b[1] << 8));
-}
-static uint32_t readLE32(std::ifstream& f) {
-    uint8_t b[4]; f.read(reinterpret_cast<char*>(b), 4);
-    return static_cast<uint32_t>(b[0]|(b[1]<<8)|(b[2]<<16)|(b[3]<<24));
-}
-
 bool AudioVizApp::loadWav(const std::string& path, WavData& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f.is_open()) { std::cerr << "Cannot open WAV: " << path << "\n"; return false; }
-
-    char riff[4]; f.read(riff, 4);
-    if (std::strncmp(riff, "RIFF", 4) != 0) { std::cerr << "Not RIFF: " << path << "\n"; return false; }
-    readLE32(f); // chunk size
-    char wave[4]; f.read(wave, 4);
-    if (std::strncmp(wave, "WAVE", 4) != 0) { std::cerr << "Not WAVE: " << path << "\n"; return false; }
-
-    uint16_t numChannels = 1, bitsPerSample = 16;
-    uint32_t sampleRate = 44100, dataSize = 0;
-
-    while (f.good()) {
-        char id[4]; f.read(id, 4);
-        uint32_t sz = readLE32(f);
-        if (!f.good()) break;
-        if (std::strncmp(id, "fmt ", 4) == 0) {
-            readLE16(f); // audio format
-            numChannels   = readLE16(f);
-            sampleRate    = readLE32(f);
-            readLE32(f); readLE16(f); // byte rate, block align
-            bitsPerSample = readLE16(f);
-            if (sz > 16) f.seekg(sz - 16, std::ios::cur);
-        } else if (std::strncmp(id, "data", 4) == 0) {
-            dataSize = sz;
-            break;
-        } else {
-            f.seekg(sz, std::ios::cur);
-        }
-    }
-
-    if (bitsPerSample != 16) {
-        std::cerr << "audio_viz: only 16-bit PCM WAV supported (" << path << " is " << bitsPerSample << "-bit)\n";
+    AudioLoader loader;
+    AudioFormat format;
+    
+    if (!loader.loadAudio(path, out.samples, format)) {
+        std::cerr << "audio_viz error: Failed to load original: " << path << "\n";
         return false;
     }
-
-    size_t numSamples = dataSize / 2;
-    out.samples.resize(numSamples);
-    f.read(reinterpret_cast<char*>(out.samples.data()), numSamples * 2);
-    out.sample_rate = static_cast<int>(sampleRate);
-    out.channels    = static_cast<int>(numChannels);
+    
+    if (format.bitsPerSample != 16) {
+        std::cerr << "audio_viz: only 16-bit PCM supported (" << path << " is " << format.bitsPerSample << "-bit)\n";
+        return false;
+    }
+    
+    out.sample_rate = format.sampleRate;
+    out.channels = format.numChannels;
     return true;
 }
 

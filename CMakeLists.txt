@@ -69,9 +69,12 @@ if(WIN32)
     find_path(MPG123_INCLUDE_DIR mpg123.h PATHS "C:/AudioLibs/include")
     find_path(LAME_INCLUDE_DIR lame/lame.h PATHS "C:/AudioLibs/include")
     
-    if(NOT MPG123_LIB OR NOT VORBIS_LIB OR NOT LAME_LIB)
-        message(WARNING "Audio libraries not found - some formats may not be supported")
-        message(STATUS "To install audio libraries, place them in C:/AudioLibs/")
+    if(NOT MPG123_LIB OR NOT LAME_LIB)
+        message(WARNING "MP3 libraries not found - MP3 support disabled")
+        message(STATUS "To enable MP3 support, install mpg123 and lame in C:/AudioLibs/")
+    endif()
+    if(NOT VORBIS_LIB OR NOT OGG_LIB)
+        message(STATUS "OGG/Vorbis libraries not found - OGG support disabled")
     endif()
 else()
     # Linux: Use pkg-config
@@ -156,7 +159,22 @@ option(BUILD_VISUALIZER "Build audio_viz visualization tool" OFF)
 
 if(BUILD_VISUALIZER)
     find_package(OpenGL REQUIRED)
-    find_package(glfw3 REQUIRED)
+    # Try vcpkg first, then C:\AudioLibs for manual install
+    find_package(glfw3)
+    if(NOT glfw3_FOUND)
+        find_library(GLFW_LIB NAMES glfw3 PATHS "C:/AudioLibs/lib")
+        find_path(GLFW_INCLUDE_DIR GLFW/glfw3.h PATHS "C:/AudioLibs/include")
+        if(GLFW_LIB AND GLFW_INCLUDE_DIR)
+            add_library(glfw3 INTERFACE IMPORTED)
+            set_target_properties(glfw3 PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${GLFW_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${GLFW_INCLUDE_DIR}")
+            set(glfw3_FOUND TRUE)
+        endif()
+    endif()
+    if(NOT glfw3_FOUND)
+        message(FATAL_ERROR "GLFW3 not found. Install via vcpkg:\n  vcpkg install glfw3:x64-windows\nOr extract to C:\\AudioLibs\\ with include\\GLFW\\glfw3.h and lib\\glfw3.lib")
+    endif()
 
     set(IMGUI_DIR  ${CMAKE_SOURCE_DIR}/tools/imgui_src)
     set(IMPLOT_DIR ${CMAKE_SOURCE_DIR}/tools/implot_src)
@@ -182,6 +200,12 @@ if(BUILD_VISUALIZER)
         src/audio_viz_main.cpp
         src/audio_viz_app.cpp
         src/miniaudio_impl.cpp
+        # Audio format support
+        src/audio_loader.cpp
+        src/wav_format.cpp
+        src/wav_reader.cpp
+        # Optional format sources
+        ${OPTIONAL_SOURCES}
         # ImGui core
         ${IMGUI_DIR}/imgui.cpp
         ${IMGUI_DIR}/imgui_draw.cpp
@@ -208,6 +232,7 @@ if(BUILD_VISUALIZER)
     target_link_libraries(audio_viz
         OpenGL::GL
         glfw
+        ${LINKED_LIBS}
     )
 
     if(NOT MSVC)
