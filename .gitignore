@@ -1,6 +1,9 @@
 # Build directories
 build/
 build-windows/
+build-viz/
+build-linux-test/
+build-user/
 *.o
 *.exe
 *.out

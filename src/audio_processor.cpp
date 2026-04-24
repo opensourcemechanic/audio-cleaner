@@ -146,7 +146,7 @@ void AudioProcessor::applyWindow(std::vector<float>& frame) {
     }
 }
 
-void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
+void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio, ProcessingMetadata& meta) {
     std::cout << "  🔍 Starting intelligent noise estimation..." << std::endl;
     const int NOISE_FRAMES = 5;  // Analyze more frames for better noise profile
     const int SEARCH_WINDOW_SECONDS = 30;  // Look within first 30 seconds
@@ -156,6 +156,7 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
     std::vector<std::complex<float>> spectrum(fftSize);
     
     std::fill(noiseSpectrum.begin(), noiseSpectrum.end(), 0.0f);
+    meta.quiet_sections.clear();
     
     // Calculate frame metrics to find quietest sections
     std::vector<std::pair<int, float>> frameEnergies;  // (frameIndex, energy)
@@ -190,6 +191,16 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
         // Skip frames that are too close to each other
         if (i > 0 && abs(frameNum - frameEnergies[i-1].first) < 10) continue;
         
+        // Capture before_samples for metadata
+        QuietSection qs;
+        qs.time_ms = frameStart * 1000.0f / 44100;
+        qs.frame_index = frameNum;
+        qs.energy = frameEnergies[i].second;
+        qs.before_samples.resize(fftSize);
+        for (int j = 0; j < fftSize && frameStart + j < static_cast<int>(audio.size()); ++j) {
+            qs.before_samples[j] = audio[frameStart + j];
+        }
+        
         // Process this quiet frame
         for (int j = 0; j < fftSize && frameStart + j < static_cast<int>(audio.size()); ++j) {
             frame[j] = static_cast<float>(audio[frameStart + j]) / 32768.0f;
@@ -208,6 +219,18 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
             noiseSpectrum[j] += magnitude * magnitude;
         }
         
+        // Capture after_samples: run spectral subtraction on this frame to get cleaned version
+        std::vector<std::complex<float>> spectrumCopy = spectrum;
+        // We apply subtraction inline here using current (partially built) noiseSpectrum
+        // after all frames are averaged we store a proper snapshot; for now store raw ifft
+        ifft(spectrumCopy);
+        qs.after_samples.resize(fftSize);
+        for (int j = 0; j < fftSize; ++j) {
+            float s = spectrumCopy[j].real() * 32768.0f;
+            qs.after_samples[j] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, s)));
+        }
+        
+        meta.quiet_sections.push_back(std::move(qs));
         noiseFramesUsed++;
         std::cout << "  📊 Using quiet frame at " << (frameStart * 1000.0f / 44100) << "ms (energy: " << frameEnergies[i].second << ")" << std::endl;
     }
@@ -220,10 +243,35 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
         }
     }
     
+    // Now go back and compute proper after_samples with the final noise spectrum
+    for (auto& qs : meta.quiet_sections) {
+        std::vector<float> f(fftSize, 0.0f);
+        std::vector<std::complex<float>> sp(fftSize);
+        for (int j = 0; j < fftSize; ++j) {
+            f[j] = static_cast<float>(qs.before_samples[j]) / 32768.0f;
+        }
+        applyWindow(f);
+        for (int j = 0; j < fftSize; ++j) sp[j] = std::complex<float>(f[j], 0);
+        fft(sp);
+        spectralSubtraction(sp, sp); // in-place: spectrumBefore unused for this pass
+        ifft(sp);
+        for (int j = 0; j < fftSize; ++j) {
+            float s = sp[j].real() * 32768.0f;
+            qs.after_samples[j] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, s)));
+        }
+    }
+    
+    // Store noise spectrum in metadata
+    meta.noise_spectrum.assign(noiseSpectrum.begin(), noiseSpectrum.begin() + fftSize / 2 + 1);
+    meta.fft_size = fftSize;
+    meta.alpha = 0.3f;
+    meta.beta = 0.3f;
+    
     std::cout << "  🔍 Noise estimation: Used " << noiseFramesUsed << " quietest frames from first " << SEARCH_WINDOW_SECONDS << " seconds" << std::endl;
 }
 
-void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spectrum) {
+void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spectrum,
+                                          std::vector<std::complex<float>>& /*spectrumBefore*/) {
     const float ALPHA = 0.3f;  // Much more conservative - only 30% subtraction
     const float BETA = 0.3f;   // Higher floor - preserve 30% of original signal
     
@@ -303,9 +351,10 @@ void AudioProcessor::processEchoCancellation(std::vector<int16_t>& audio, const 
     audio = audioCopy;
 }
 
-void AudioProcessor::processNoiseReduction(std::vector<int16_t>& audio) {
+ProcessingMetadata AudioProcessor::processNoiseReduction(std::vector<int16_t>& audio) {
+    ProcessingMetadata meta;
     // Estimate noise spectrum from first few frames
-    estimateNoiseSpectrum(audio);
+    estimateNoiseSpectrum(audio, meta);
     
     // Process audio in overlapping frames
     std::vector<float> frame(fftSize);
@@ -347,7 +396,7 @@ void AudioProcessor::processNoiseReduction(std::vector<int16_t>& audio) {
         fft(spectrum);
         
         // Apply spectral subtraction
-        spectralSubtraction(spectrum);
+        spectralSubtraction(spectrum, spectrum);
         
         // Convert back to time domain
         ifft(spectrum);
@@ -393,13 +442,14 @@ void AudioProcessor::processNoiseReduction(std::vector<int16_t>& audio) {
     std::cout << "100%\n";
     
     std::cout << "✅ Applied: Noise reduction only\n";
+    return meta;
 }
 
-void AudioProcessor::processFull(std::vector<int16_t>& audio, const std::vector<int16_t>& reference) {
+ProcessingMetadata AudioProcessor::processFull(std::vector<int16_t>& audio, const std::vector<int16_t>& reference) {
     if (!reference.empty()) {
         processEchoCancellation(audio, reference);
     }
-    processNoiseReduction(audio);
+    return processNoiseReduction(audio);
 }
 
 void AudioProcessor::processClippingReduction(std::vector<int16_t>& audio, float threshold) {

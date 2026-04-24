@@ -146,3 +146,82 @@ endif()
 install(TARGETS audio_cleaner
     RUNTIME DESTINATION bin
 )
+
+# =============================================================================
+# Optional: audio_viz visualizer tool
+# Build with: cmake -DBUILD_VISUALIZER=ON ..
+# Requires: GLFW3, OpenGL, and internet access for imgui/implot (fetched via git)
+# =============================================================================
+option(BUILD_VISUALIZER "Build audio_viz visualization tool" OFF)
+
+if(BUILD_VISUALIZER)
+    find_package(OpenGL REQUIRED)
+    find_package(glfw3 REQUIRED)
+
+    set(IMGUI_DIR  ${CMAKE_SOURCE_DIR}/tools/imgui_src)
+    set(IMPLOT_DIR ${CMAKE_SOURCE_DIR}/tools/implot_src)
+
+    # Check that ImGui/ImPlot sources were cloned
+    if(NOT EXISTS "${IMGUI_DIR}/imgui.h")
+        message(FATAL_ERROR
+            "ImGui sources not found at ${IMGUI_DIR}.\n"
+            "Run: cd tools && git clone --depth=1 https://github.com/ocornut/imgui.git imgui_src")
+    endif()
+    if(NOT EXISTS "${IMPLOT_DIR}/implot.h")
+        message(FATAL_ERROR
+            "ImPlot sources not found at ${IMPLOT_DIR}.\n"
+            "Run: cd tools && git clone --depth=1 https://github.com/epezent/implot.git implot_src")
+    endif()
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/tools/miniaudio.h")
+        message(FATAL_ERROR
+            "miniaudio.h not found at tools/miniaudio.h.\n"
+            "Run: curl -L -o tools/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h")
+    endif()
+
+    set(VIZ_SOURCES
+        src/audio_viz_main.cpp
+        src/audio_viz_app.cpp
+        src/miniaudio_impl.cpp
+        # ImGui core
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        # ImGui GLFW + OpenGL3 backends
+        ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+        # ImPlot
+        ${IMPLOT_DIR}/implot.cpp
+        ${IMPLOT_DIR}/implot_items.cpp
+    )
+
+    add_executable(audio_viz ${VIZ_SOURCES})
+
+    target_include_directories(audio_viz PRIVATE
+        include
+        ${IMGUI_DIR}
+        ${IMGUI_DIR}/backends
+        ${IMPLOT_DIR}
+        tools
+    )
+
+    target_link_libraries(audio_viz
+        OpenGL::GL
+        glfw
+    )
+
+    if(NOT MSVC)
+        target_link_libraries(audio_viz m)
+    endif()
+
+    # Linux: link dl and pthread for miniaudio
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(audio_viz dl pthread)
+    endif()
+
+    set_target_properties(audio_viz PROPERTIES CXX_STANDARD 17)
+
+    install(TARGETS audio_viz RUNTIME DESTINATION bin)
+
+    message(STATUS "audio_viz visualizer: ENABLED")
+endif()

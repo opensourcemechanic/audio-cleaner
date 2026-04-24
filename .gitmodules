@@ -1,0 +1,6 @@
+[submodule "tools/imgui_src"]
+	path = tools/imgui_src
+	url = https://github.com/ocornut/imgui.git
+[submodule "tools/implot_src"]
+	path = tools/implot_src
+	url = https://github.com/epezent/implot.git

@@ -2,6 +2,7 @@
 #include "../include/audio_processor.h"
 #include "../include/audio_processor_backend.h"
 #include "../include/wav_format.h"
+#include "../include/nlohmann/json.hpp"
 
 #ifdef HAVE_MPG123
 #ifdef HAVE_LAME
@@ -20,6 +21,7 @@
 #endif
 #include <iostream>
 #include <chrono>
+#include <fstream>
 
 void initializeFormats() {
     auto& factory = AudioFormatFactory::getInstance();
@@ -133,6 +135,8 @@ int main(int argc, char* argv[]) {
     float clippingThreshold = 0.95f;
     bool forceGPU = false;
     std::string backendType = "auto";
+    bool writeMeta = true;
+    std::string metaOutPath;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -218,6 +222,12 @@ int main(int argc, char* argv[]) {
         }
         else if (arg == "--force-gpu") {
             forceGPU = true;
+        }
+        else if (arg == "--no-meta") {
+            writeMeta = false;
+        }
+        else if (arg == "--meta-out" && i + 1 < argc) {
+            metaOutPath = argv[++i];
         }
         else if (arg == "--backend" && i + 1 < argc) {
             backendType = argv[++i];
@@ -324,6 +334,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Processing audio...\n";
     std::cout << "\n=== AUDIO CLEANING ALGORITHMS ===\n\n";
     
+    ProcessingMetadata meta;
     if (hasReference) {
         std::cout << "🔧 ECHO CANCELLATION + NOISE REDUCTION:\n";
         std::cout << "   • Echo Cancellation: Using adaptive LMS filter to model and remove echo\n";
@@ -337,7 +348,7 @@ int main(int argc, char* argv[]) {
         std::cout << "     - Subtracts noise estimate while preserving speech/music\n";
         std::cout << "     - Applies spectral flooring to prevent musical noise artifacts\n";
         std::cout << "\n";
-        processor.processFull(audioData, referenceData);
+        meta = processor.processFull(audioData, referenceData);
         std::cout << "✅ Applied: Echo cancellation + Noise reduction\n";
     } else {
         std::cout << "🔧 NOISE REDUCTION ONLY:\n";
@@ -352,7 +363,7 @@ int main(int argc, char* argv[]) {
         std::cout << "   • Best for: Stationary background noise (hiss, hum, fan noise)\n";
         std::cout << "   • Limitations: Less effective for rapidly changing noise\n";
         std::cout << "\n";
-        processor.processNoiseReduction(audioData);
+        meta = processor.processNoiseReduction(audioData);
     }
     
     // Apply low-frequency removal if enabled
@@ -389,6 +400,58 @@ int main(int argc, char* argv[]) {
     }
     
     std::cout << "Cleaned audio saved to: " << outputFile << std::endl;
+    
+    // Write .json sidecar metadata file
+    if (writeMeta) {
+        // Derive output path: same dir/basename as output file
+        if (metaOutPath.empty()) {
+            size_t dot = outputFile.rfind('.');
+            metaOutPath = (dot != std::string::npos ? outputFile.substr(0, dot) : outputFile) + ".json";
+        }
+        
+        // Reconstruct command line string
+        std::string cmdLine;
+        for (int i = 0; i < argc; ++i) {
+            if (i > 0) cmdLine += ' ';
+            cmdLine += argv[i];
+        }
+        
+        nlohmann::json j;
+        j["generator"] = "audio-cleaner";
+        j["version"] = 1;
+        j["command_line"] = cmdLine;
+        j["input_file"] = inputFile;
+        j["output_file"] = outputFile;
+        j["sample_rate"] = inputFormat.sampleRate;
+        j["channels"] = inputFormat.numChannels;
+        j["bits_per_sample"] = inputFormat.bitsPerSample;
+        j["fft_size"] = meta.fft_size;
+        j["alpha"] = meta.alpha;
+        j["beta"] = meta.beta;
+        if (enableNormalization) j["normalize_level_db"] = normalizeLevel;
+        
+        // Quiet sections with before/after samples
+        nlohmann::json sections = nlohmann::json::array();
+        for (const auto& qs : meta.quiet_sections) {
+            nlohmann::json s;
+            s["time_ms"] = qs.time_ms;
+            s["frame_index"] = qs.frame_index;
+            s["energy"] = qs.energy;
+            s["before_samples"] = qs.before_samples;
+            s["after_samples"] = qs.after_samples;
+            sections.push_back(std::move(s));
+        }
+        j["quiet_sections"] = sections;
+        j["noise_spectrum"] = meta.noise_spectrum;
+        
+        std::ofstream metaFile(metaOutPath);
+        if (metaFile.is_open()) {
+            metaFile << j.dump(2) << "\n";
+            std::cout << "Metadata saved to: " << metaOutPath << std::endl;
+        } else {
+            std::cerr << "Warning: Could not write metadata file: " << metaOutPath << std::endl;
+        }
+    }
     
     return 0;
 }
