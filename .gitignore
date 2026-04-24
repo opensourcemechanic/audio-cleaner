@@ -11,6 +11,21 @@ build-user/
 
 # Compiled binaries
 audio_cleaner
+audio_cleaner_opencl
+audio_viz
+
+# Compiled tool binaries
+tools/bypass_converter
+tools/clipping_analyzer
+tools/fft_analyzer
+tools/reference_generator
+tools/simple_clipping_analyzer
+tools/wav_checker
+tools/wav_reader_test
+
+# Throwaway root-level test scripts
+test_*.sh
+test_syntax.cpp
 
 # Test output files
 test_*.wav
