@@ -52,3 +52,23 @@ Makefile
 
 # Log files
 *.log
+
+# Visualization artifacts
+build-viz/
+tools/imgui_src/
+tools/implot_src/
+tools/imgui/
+tools/implot/
+imgui.ini
+generate_test_audio*
+```
+
+### **📦 Libraries Status:**
+- **No GUI libraries installed** - ImGui/ImPlot were git submodules, already removed
+- **No system dependencies added** - GLFW/OpenGL would have been optional
+- **Core audio libraries intact** - mpg123, lame, vorbis, etc. remain for audio processing
+
+### **🔧 Final Cleanup Commands:**
+<tool_call>bash
+<arg_key>CommandLine</arg_key>
+<arg_value>rm -rf tools/imgui/ tools/implot/
