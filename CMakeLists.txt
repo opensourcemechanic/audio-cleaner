@@ -35,8 +35,14 @@ endif()
 
 add_executable(audio_cleaner ${CORE_SOURCES} ${OPTIONAL_SOURCES})
 
-# Link math library on non-Windows systems
-if(NOT MSVC)
+# MSVC-specific compiler flags
+if(MSVC)
+    # Enable exception handling
+    target_compile_options(audio_cleaner PRIVATE /EHsc)
+    # Define math constants for Windows
+    target_compile_definitions(audio_cleaner PRIVATE _USE_MATH_DEFINES)
+else()
+    # Link math library on non-Windows systems
     target_link_libraries(audio_cleaner m)
 endif()
 
@@ -44,7 +50,10 @@ endif()
 if(ENABLE_OPENCL)
     find_package(OpenCL REQUIRED)
     if(OpenCL_FOUND)
-        target_compile_definitions(audio_cleaner PRIVATE ENABLE_OPENCL)
+        target_compile_definitions(audio_cleaner PRIVATE 
+            ENABLE_OPENCL 
+            CL_TARGET_OPENCL_VERSION=120
+        )
         target_link_libraries(audio_cleaner ${OpenCL_LIBRARIES})
         target_include_directories(audio_cleaner PRIVATE ${OpenCL_INCLUDE_DIRS})
         message(STATUS "OpenCL GPU acceleration enabled")

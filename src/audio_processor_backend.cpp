@@ -193,44 +193,66 @@ OpenCLBackend::~OpenCLBackend() = default;
 bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
     // Get platforms
     cl_uint numPlatforms;
-    if (clGetPlatformIDs(0, nullptr, &numPlatforms) != CL_SUCCESS || numPlatforms == 0) {
+    cl_int err = clGetPlatformIDs(0, nullptr, &numPlatforms);
+    if (err != CL_SUCCESS || numPlatforms == 0) {
+        std::cerr << "OpenCL: No platforms found (error " << err << ")" << std::endl;
         return false;
     }
     
     std::vector<cl_platform_id> platforms(numPlatforms);
-    clGetPlatformIDs(numPlatforms, platforms.data(), nullptr);
+    err = clGetPlatformIDs(numPlatforms, platforms.data(), nullptr);
+    if (err != CL_SUCCESS) {
+        std::cerr << "OpenCL: Failed to get platforms (error " << err << ")" << std::endl;
+        return false;
+    }
     
     // Find GPU platform
     cl_platform_id selectedPlatform = nullptr;
+    cl_uint numDevices = 0;
     for (cl_platform_id platform : platforms) {
-        cl_uint numDevices;
-        clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices);
-        if (numDevices > 0) {
+        err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices);
+        if (err == CL_SUCCESS && numDevices > 0) {
             selectedPlatform = platform;
             break;
         }
     }
     
-    if (!selectedPlatform) {
+    if (!selectedPlatform || numDevices == 0) {
+        std::cerr << "OpenCL: No GPU devices found" << std::endl;
         return false;
     }
     
     // Get GPU device
     cl_device_id device;
-    clGetDeviceIDs(selectedPlatform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr);
+    err = clGetDeviceIDs(selectedPlatform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr);
+    if (err != CL_SUCCESS) {
+        std::cerr << "OpenCL: Failed to get GPU device (error " << err << ")" << std::endl;
+        return false;
+    }
     
     // Create context
-    impl->context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, nullptr);
-    if (!impl->context) return false;
+    impl->context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
+    if (err != CL_SUCCESS || !impl->context) {
+        std::cerr << "OpenCL: Failed to create context (error " << err << ")" << std::endl;
+        return false;
+    }
     
     // Create command queue
-    impl->queue = clCreateCommandQueueWithProperties(impl->context, device, nullptr, nullptr);
-    if (!impl->queue) return false;
+    impl->queue = clCreateCommandQueueWithProperties(impl->context, device, nullptr, &err);
+    if (err != CL_SUCCESS || !impl->queue) {
+        std::cerr << "OpenCL: Failed to create command queue (error " << err << ")" << std::endl;
+        clReleaseContext(impl->context);
+        impl->context = nullptr;
+        return false;
+    }
     
     impl->device = device;
     
     // Load and compile OpenCL kernels
     const char* kernelSource = R"CLC(
+    // Define PI for OpenCL kernel
+    #define M_PI 3.14159265358979323846f
+    
     // Simple DFT kernel (working but slow)
     __kernel void fft(__global float2* data, const int N, const int direction) {
         int gid = get_global_id(0);
@@ -450,7 +472,12 @@ std::unique_ptr<AudioProcessorBackend> AudioProcessorFactory::createBackend(
         case BackendType::OPENCL:
 #ifdef ENABLE_OPENCL
             if (OpenCLBackend::isAvailable()) {
-                return std::make_unique<OpenCLBackend>(deviceHint);
+                try {
+                    return std::make_unique<OpenCLBackend>(deviceHint);
+                } catch (const std::exception& e) {
+                    std::cerr << "Warning: OpenCL initialization failed: " << e.what() << std::endl;
+                    std::cerr << "Falling back to CPU backend" << std::endl;
+                }
             }
 #endif
             return std::make_unique<CPUBackend>();
@@ -470,7 +497,22 @@ std::unique_ptr<AudioProcessorBackend> AudioProcessorFactory::createOptimalBacke
     double audioDurationSeconds, bool forceGPU
 ) {
     if (forceGPU) {
-        return createBackend(BackendType::OPENCL);
+#ifdef ENABLE_OPENCL
+        if (OpenCLBackend::isAvailable()) {
+            try {
+                return std::make_unique<OpenCLBackend>();
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: GPU acceleration requested but OpenCL failed: " << e.what() << std::endl;
+                std::cerr << "Continuing with CPU backend" << std::endl;
+            }
+        } else {
+            std::cerr << "Warning: GPU acceleration requested but no OpenCL devices available" << std::endl;
+            std::cerr << "Continuing with CPU backend" << std::endl;
+        }
+#else
+        std::cerr << "Warning: GPU acceleration requested but OpenCL support not compiled" << std::endl;
+        std::cerr << "Continuing with CPU backend" << std::endl;
+#endif
     }
     
     // Use GPU for audio longer than 5 minutes (300 seconds)
