@@ -237,8 +237,8 @@ bool OpenCLBackend::initializeOpenCL(const std::string& deviceType) {
         return false;
     }
     
-    // Create command queue
-    impl->queue = clCreateCommandQueueWithProperties(impl->context, device, nullptr, &err);
+    // Create command queue (use older function for compatibility)
+    impl->queue = clCreateCommandQueue(impl->context, device, 0, &err);
     if (err != CL_SUCCESS || !impl->queue) {
         std::cerr << "OpenCL: Failed to create command queue (error " << err << ")" << std::endl;
         clReleaseContext(impl->context);
