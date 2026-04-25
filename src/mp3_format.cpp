@@ -2,13 +2,21 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+
+#ifdef HAVE_MPG123
 #include <mpg123.h>
+#endif
+#ifdef HAVE_LAME
 #include <lame/lame.h>
+#endif
 
 // Real MP3 implementation using libmpg123 (reading) and LAME (writing)
 
+#ifdef HAVE_MPG123
 static bool mpg123_initialized = false;
+#endif
 
+#ifdef HAVE_MPG123
 Mp3Reader::Mp3Reader() : mp3Handle(nullptr), isOpen(false) {
     if (!mpg123_initialized) {
         mpg123_init();
@@ -114,7 +122,9 @@ bool Mp3Reader::canHandle(const std::string& filename) const {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return ext == "mp3";
 }
+#endif // HAVE_MPG123
 
+#ifdef HAVE_LAME
 Mp3Writer::Mp3Writer(int quality) : lameHandle(nullptr), isOpen(false), quality(quality), filename("") {}
 
 Mp3Writer::~Mp3Writer() {
@@ -266,3 +276,4 @@ bool Mp3Writer::canHandle(const std::string& filename) const {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return ext == "mp3";
 }
+#endif // HAVE_LAME

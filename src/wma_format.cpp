@@ -5,10 +5,20 @@
 
 // WMA format implementation using FFmpeg
 
+#ifdef HAVE_FFMPEG
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/avutil.h>
+#include <libswresample/swresample.h>
+}
+
 WmaReader::WmaReader() : formatContext(nullptr), codecContext(nullptr), 
                          swrContext(nullptr), audioStreamIndex(-1), isOpen(false) {
 }
+#endif // HAVE_FFMPEG
 
+#ifdef HAVE_FFMPEG
 WmaReader::~WmaReader() {
     close();
 }
@@ -217,9 +227,11 @@ bool WmaReader::canHandle(const std::string& filename) const {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return ext == "wma";
 }
+#endif // HAVE_FFMPEG
 
 // WMA Writer implementation (simplified - WMA encoding is complex)
 
+#ifdef HAVE_FFMPEG
 WmaWriter::WmaWriter() : formatContext(nullptr), codecContext(nullptr),
                          swrContext(nullptr), isOpen(false) {
 }
@@ -267,3 +279,4 @@ bool WmaWriter::canHandle(const std::string& filename) const {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return ext == "wma";
 }
+#endif // HAVE_FFMPEG

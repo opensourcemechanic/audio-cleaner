@@ -1,6 +1,17 @@
 #include "../include/audio_viz_app.h"
 #include "../include/meta_reader.h"
 #include "../include/audio_loader.h"
+#include "../include/audio_factory.h"
+#include "../include/wav_format.h"
+#ifdef HAVE_MPG123
+#include "../include/mp3_format.h"
+#endif
+#ifdef HAVE_VORBIS
+#include "../include/ogg_format.h"
+#endif
+#ifdef HAVE_FFMPEG
+#include "../include/wma_format.h"
+#endif
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -75,6 +86,28 @@ AudioVizApp::AudioVizApp(const std::string& originalPath,
                          bool pipeMode)
     : pipeMode_(pipeMode)
 {
+    // Register audio formats (same as main.cpp)
+    auto& factory = AudioFormatFactory::getInstance();
+    
+    // Register built-in formats
+    factory.registerFormat(std::make_unique<WavFormat>());
+    
+#ifdef HAVE_MPG123
+#ifdef HAVE_LAME
+    factory.registerFormat(std::make_unique<Mp3Format>());
+#endif
+#endif
+
+#ifdef HAVE_VORBIS
+#ifdef HAVE_OGG
+    factory.registerFormat(std::make_unique<OggFormat>());
+#endif
+#endif
+
+#ifdef HAVE_FFMPEG
+    factory.registerFormat(std::make_unique<WmaFormat>());
+#endif
+
     meta_ = loadMetadata(metaPath);
 
     if (!loadWav(originalPath, original_))
@@ -355,10 +388,6 @@ void AudioVizApp::renderUI() {
             ImPlot::PlotLine("Before", ss.freqAxis.data(), ss.beforeMag.data(), half, lineSpec(COL_BEFORE));
             ImPlot::PlotLine("After",  ss.freqAxis.data(), ss.afterMag.data(), half, lineSpec(COL_AFTER));
         }
-        if (!avgNoiseSpectrum_.empty() && !freqAxis_.empty()) {
-            int half = static_cast<int>(freqAxis_.size());
-            ImPlot::PlotLine("Noise Filter", freqAxis_.data(), avgNoiseSpectrum_.data(), half, lineSpec(COL_NOISE, 2.0f));
-        }
         ImPlot::EndPlot();
     }
 
@@ -372,9 +401,6 @@ void AudioVizApp::renderUI() {
             const auto& ss = sectionSpectra_[sectionIdx];
             int half = static_cast<int>(ss.freqAxis.size());
             ImPlot::PlotLine("Diff", ss.freqAxis.data(), ss.diffMag.data(), half, lineSpec(COL_DIFF));
-            if (!avgNoiseSpectrum_.empty()) {
-                ImPlot::PlotLine("Noise Filter", freqAxis_.data(), avgNoiseSpectrum_.data(), half, lineSpec(COL_NOISE, 2.0f));
-            }
         }
         ImPlot::EndPlot();
     }
@@ -432,9 +458,6 @@ void AudioVizApp::renderUI() {
 
         ImPlot::PlotLine("Before", fa.data(), origMag.data(), (int)half, lineSpec(COL_BEFORE));
         ImPlot::PlotLine("After",  fa.data(), cleanMag.data(), (int)half, lineSpec(COL_AFTER));
-        if (!avgNoiseSpectrum_.empty() && !freqAxis_.empty()) {
-            ImPlot::PlotLine("Noise Filter", freqAxis_.data(), avgNoiseSpectrum_.data(), (int)freqAxis_.size(), lineSpec(COL_NOISE, 2.0f));
-        }
         ImPlot::EndPlot();
     }
 
