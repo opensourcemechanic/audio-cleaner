@@ -74,6 +74,8 @@ void printUsage(const char* programName) {
     std::cout << "  --clipping-threshold <threshold> Clipping threshold (0.8-0.99, default: 0.95)\n";
     std::cout << "  --rnnoise           Apply RNNoise neural network denoising (requires librnnoise)\n";
     std::cout << "  --rnnoise-only      Apply ONLY RNNoise (skip spectral subtraction DSP)\n";
+    std::cout << "  --rnnoise-blend <f> Wet/dry mix for RNNoise (0.0=dry, 1.0=full denoise, default: 1.0)\n";
+    std::cout << "  --rnnoise-vad <f>   Fade toward dry when VAD < threshold (0.0-1.0, default: 0.0=off)\n";
     std::cout << "  --force-gpu         Force GPU acceleration (requires OpenCL)\n";
     std::cout << "  --backend <type>    Force processing backend (cpu/opencl/auto)\n";
     std::cout << "  -f                  List supported formats\n";
@@ -138,6 +140,8 @@ int main(int argc, char* argv[]) {
     std::string backendType = "auto";
     bool enableRNNoise = false;
     bool rnnoiseOnly = false;
+    float rnnoiseBlend = 1.0f;      // 1.0 = full denoised, 0.0 = dry
+    float rnnoiseVadThreshold = 0.0f; // 0.0 = disabled
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -227,6 +231,14 @@ int main(int argc, char* argv[]) {
         else if (arg == "--rnnoise-only") {
             enableRNNoise = true;
             rnnoiseOnly = true;
+        }
+        else if (arg == "--rnnoise-blend" && i + 1 < argc) {
+            rnnoiseBlend = std::stof(argv[++i]);
+            rnnoiseBlend = std::max(0.0f, std::min(1.0f, rnnoiseBlend));
+        }
+        else if (arg == "--rnnoise-vad" && i + 1 < argc) {
+            rnnoiseVadThreshold = std::stof(argv[++i]);
+            rnnoiseVadThreshold = std::max(0.0f, std::min(1.0f, rnnoiseVadThreshold));
         }
         else if (arg == "--force-gpu") {
             forceGPU = true;
@@ -389,7 +401,15 @@ int main(int argc, char* argv[]) {
             std::cout << "   • Mode: Post-DSP (applied after spectral subtraction)\n";
         std::cout << "\n";
 
-        RNNoiseProcessor rnn;
+        RNNoiseProcessor rnn(rnnoiseBlend, rnnoiseVadThreshold);
+        if (rnnoiseBlend < 1.0f)
+            std::cout << "   • Blend: " << (rnnoiseBlend * 100.0f) << "% denoised / "
+                      << ((1.0f - rnnoiseBlend) * 100.0f) << "% original\n";
+        if (rnnoiseVadThreshold > 0.0f)
+            std::cout << "   • VAD threshold: " << rnnoiseVadThreshold
+                      << " (quiet frames fade toward original)\n";
+        std::cout << "\n";
+
         bool rnOk = false;
         if (inputFormat.numChannels == 2)
             rnOk = rnn.processStereo(audioData, inputFormat.sampleRate);

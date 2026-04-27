@@ -9,18 +9,18 @@
 // ---------------------------------------------------------------------------
 #ifndef HAVE_RNNOISE
 
-RNNoiseProcessor::RNNoiseProcessor() {}
+RNNoiseProcessor::RNNoiseProcessor(float /*blend*/, float /*vadThreshold*/) {}
 RNNoiseProcessor::~RNNoiseProcessor() {}
 
 bool RNNoiseProcessor::isAvailable() { return false; }
 
 bool RNNoiseProcessor::process(std::vector<int16_t>&, int) {
-    std::cerr << "RNNoise: library not available (build with -DHAVE_RNNOISE)\n";
+    std::cerr << "RNNoise: library not available (build with -DENABLE_RNNOISE=ON)\n";
     return false;
 }
 
 bool RNNoiseProcessor::processStereo(std::vector<int16_t>&, int) {
-    std::cerr << "RNNoise: library not available (build with -DHAVE_RNNOISE)\n";
+    std::cerr << "RNNoise: library not available (build with -DENABLE_RNNOISE=ON)\n";
     return false;
 }
 
@@ -29,7 +29,10 @@ bool RNNoiseProcessor::processStereo(std::vector<int16_t>&, int) {
 // ---------------------------------------------------------------------------
 #else
 
-RNNoiseProcessor::RNNoiseProcessor() {
+RNNoiseProcessor::RNNoiseProcessor(float blend, float vadThreshold)
+    : blend_(std::max(0.0f, std::min(1.0f, blend)))
+    , vadThreshold_(std::max(0.0f, std::min(1.0f, vadThreshold)))
+{
     state_ = rnnoise_create(nullptr);
 }
 
@@ -76,44 +79,72 @@ void RNNoiseProcessor::floatToInt16(const std::vector<float>& in, std::vector<in
     }
 }
 
-bool RNNoiseProcessor::processMonoFloat(std::vector<float>& samples) {
-    if (!state_) return false;
+// Process a single float buffer through RNNoise frames.
+// dry is kept for wet/dry blending. vadOverride (if >= 0) forces a specific
+// VAD value for this call — used for linked stereo gating.
+float RNNoiseProcessor::processMonoFloat(std::vector<float>& samples,
+                                         const std::vector<float>& dry,
+                                         float vadOverride) {
+    if (!state_) return 0.0f;
 
-    // RNNoise processes fixed RNNOISE_FRAME_SIZE frames
     size_t numFrames = samples.size() / RNNOISE_FRAME_SIZE;
     float frame[RNNOISE_FRAME_SIZE];
+    float vad = 0.0f;
 
     for (size_t f = 0; f < numFrames; ++f) {
-        float* src = samples.data() + f * RNNOISE_FRAME_SIZE;
-        std::memcpy(frame, src, RNNOISE_FRAME_SIZE * sizeof(float));
-        lastVad_ = rnnoise_process_frame(state_, frame, frame);
-        std::memcpy(src, frame, RNNOISE_FRAME_SIZE * sizeof(float));
+        float* wet = samples.data() + f * RNNOISE_FRAME_SIZE;
+        const float* orig = dry.data() + f * RNNOISE_FRAME_SIZE;
+
+        std::memcpy(frame, wet, RNNOISE_FRAME_SIZE * sizeof(float));
+        vad = rnnoise_process_frame(state_, frame, frame);
+
+        // If a linked VAD is supplied use that; otherwise use this frame's own VAD
+        float effectiveVad = (vadOverride >= 0.0f) ? vadOverride : vad;
+
+        // Compute effective blend: if VAD is below threshold, fade back toward dry
+        float frameMix = blend_;
+        if (vadThreshold_ > 0.0f && effectiveVad < vadThreshold_) {
+            float vadRatio = effectiveVad / vadThreshold_; // 0..1
+            frameMix = blend_ * vadRatio;
+        }
+
+        // Mix denoised (wet) with original (dry)
+        for (int s = 0; s < RNNOISE_FRAME_SIZE; ++s)
+            wet[s] = frame[s] * frameMix + orig[s] * (1.0f - frameMix);
     }
 
-    // Handle any remaining samples (< RNNOISE_FRAME_SIZE) with zero-padding
+    // Handle remainder with zero-padding
     size_t remainder = samples.size() % RNNOISE_FRAME_SIZE;
     if (remainder > 0) {
+        float* wet = samples.data() + numFrames * RNNOISE_FRAME_SIZE;
+        const float* orig = dry.data() + numFrames * RNNOISE_FRAME_SIZE;
+
         std::memset(frame, 0, sizeof(frame));
-        std::memcpy(frame, samples.data() + numFrames * RNNOISE_FRAME_SIZE,
-                    remainder * sizeof(float));
-        lastVad_ = rnnoise_process_frame(state_, frame, frame);
-        std::memcpy(samples.data() + numFrames * RNNOISE_FRAME_SIZE, frame,
-                    remainder * sizeof(float));
+        std::memcpy(frame, wet, remainder * sizeof(float));
+        vad = rnnoise_process_frame(state_, frame, frame);
+
+        float effectiveVad = (vadOverride >= 0.0f) ? vadOverride : vad;
+        float frameMix = blend_;
+        if (vadThreshold_ > 0.0f && effectiveVad < vadThreshold_)
+            frameMix = blend_ * (effectiveVad / vadThreshold_);
+
+        for (size_t s = 0; s < remainder; ++s)
+            wet[s] = frame[s] * frameMix + orig[s] * (1.0f - frameMix);
     }
-    return true;
+    return vad;
 }
 
 bool RNNoiseProcessor::process(std::vector<int16_t>& audio, int sampleRate) {
     if (!state_ || audio.empty()) return false;
 
-    // Convert to float, resample to 48kHz, denoise, resample back
-    std::vector<float> f = int16ToFloat(audio);
-    std::vector<float> up = resample(f, sampleRate, RNNOISE_SAMPLE_RATE);
+    std::vector<float> orig = int16ToFloat(audio);
+    std::vector<float> up   = resample(orig, sampleRate, RNNOISE_SAMPLE_RATE);
+    std::vector<float> dryUp = up; // keep dry copy at 48kHz for blending
 
-    if (!processMonoFloat(up)) return false;
+    lastVad_ = processMonoFloat(up, dryUp, -1.0f);
 
     std::vector<float> down = resample(up, RNNOISE_SAMPLE_RATE, sampleRate);
-    down.resize(audio.size()); // ensure same length
+    down.resize(audio.size());
     floatToInt16(down, audio);
     return true;
 }
@@ -122,30 +153,86 @@ bool RNNoiseProcessor::processStereo(std::vector<int16_t>& audio, int sampleRate
     if (!state_ || audio.empty()) return false;
 
     size_t frames = audio.size() / 2;
-    std::vector<int16_t> left(frames), right(frames);
+    std::vector<float> left(frames), right(frames);
 
     // De-interleave
     for (size_t i = 0; i < frames; ++i) {
-        left[i]  = audio[i * 2];
-        right[i] = audio[i * 2 + 1];
+        left[i]  = static_cast<float>(audio[i * 2]);
+        right[i] = static_cast<float>(audio[i * 2 + 1]);
     }
 
-    // Process each channel (create a second state for right channel)
-    DenoiseState* rightState = rnnoise_create(nullptr);
+    // Upsample both channels to 48kHz
+    std::vector<float> upL    = resample(left,  sampleRate, RNNOISE_SAMPLE_RATE);
+    std::vector<float> upR    = resample(right, sampleRate, RNNOISE_SAMPLE_RATE);
+    std::vector<float> dryUpL = upL;
+    std::vector<float> dryUpR = upR;
 
-    process(left, sampleRate);
+    // --- PASS 1: collect per-frame VAD for both channels without writing output
+    // We need the max VAD across channels so we can gate both identically.
+    // Use a temporary state to do a dry-run on the right channel.
+    DenoiseState* stateR = rnnoise_create(nullptr);
 
-    // Temporarily swap state for right channel
-    DenoiseState* tmp = state_;
-    state_ = rightState;
-    process(right, sampleRate);
-    state_ = tmp;
-    rnnoise_destroy(rightState);
+    std::vector<float> vadL, vadR;
+    {
+        // Collect left VADs (using state_)
+        DenoiseState* savedState = state_;
+        float tmp[RNNOISE_FRAME_SIZE];
+        size_t nFrames = upL.size() / RNNOISE_FRAME_SIZE;
+        vadL.resize(nFrames + 1, 0.0f);
+        vadR.resize(nFrames + 1, 0.0f);
 
-    // Re-interleave
+        // Temporary separate states for VAD scan so we don't advance main states
+        DenoiseState* scanL = rnnoise_create(nullptr);
+        DenoiseState* scanR = rnnoise_create(nullptr);
+        for (size_t f = 0; f < nFrames; ++f) {
+            std::memcpy(tmp, upL.data() + f * RNNOISE_FRAME_SIZE, RNNOISE_FRAME_SIZE * sizeof(float));
+            vadL[f] = rnnoise_process_frame(scanL, tmp, tmp);
+            std::memcpy(tmp, upR.data() + f * RNNOISE_FRAME_SIZE, RNNOISE_FRAME_SIZE * sizeof(float));
+            vadR[f] = rnnoise_process_frame(scanR, tmp, tmp);
+        }
+        rnnoise_destroy(scanL);
+        rnnoise_destroy(scanR);
+        (void)savedState;
+    }
+
+    // --- PASS 2: process with linked (max) VAD per frame
+    size_t nFrames = upL.size() / RNNOISE_FRAME_SIZE;
+    float frameL[RNNOISE_FRAME_SIZE], frameR[RNNOISE_FRAME_SIZE];
+
+    for (size_t f = 0; f < nFrames; ++f) {
+        float linkedVad = std::max(vadL[f], vadR[f]);
+        lastVad_ = linkedVad;
+
+        float frameMix = blend_;
+        if (vadThreshold_ > 0.0f && linkedVad < vadThreshold_)
+            frameMix = blend_ * (linkedVad / vadThreshold_);
+
+        float* wL = upL.data() + f * RNNOISE_FRAME_SIZE;
+        float* wR = upR.data() + f * RNNOISE_FRAME_SIZE;
+        const float* dL = dryUpL.data() + f * RNNOISE_FRAME_SIZE;
+        const float* dR = dryUpR.data() + f * RNNOISE_FRAME_SIZE;
+
+        std::memcpy(frameL, wL, RNNOISE_FRAME_SIZE * sizeof(float));
+        std::memcpy(frameR, wR, RNNOISE_FRAME_SIZE * sizeof(float));
+        rnnoise_process_frame(state_, frameL, frameL);
+        rnnoise_process_frame(stateR,  frameR, frameR);
+
+        for (int s = 0; s < RNNOISE_FRAME_SIZE; ++s) {
+            wL[s] = frameL[s] * frameMix + dL[s] * (1.0f - frameMix);
+            wR[s] = frameR[s] * frameMix + dR[s] * (1.0f - frameMix);
+        }
+    }
+    rnnoise_destroy(stateR);
+
+    // Downsample back and re-interleave
+    std::vector<float> downL = resample(upL, RNNOISE_SAMPLE_RATE, sampleRate);
+    std::vector<float> downR = resample(upR, RNNOISE_SAMPLE_RATE, sampleRate);
+    downL.resize(frames);
+    downR.resize(frames);
+
     for (size_t i = 0; i < frames; ++i) {
-        audio[i * 2]     = left[i];
-        audio[i * 2 + 1] = right[i];
+        audio[i * 2]     = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, downL[i])));
+        audio[i * 2 + 1] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, downR[i])));
     }
     return true;
 }

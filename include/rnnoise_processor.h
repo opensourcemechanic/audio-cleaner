@@ -14,7 +14,10 @@ static constexpr int RNNOISE_SAMPLE_RATE = 48000;
 
 class RNNoiseProcessor {
 public:
-    RNNoiseProcessor();
+    // blend: 0.0 = keep original, 1.0 = full denoised (default 1.0)
+    // vadThreshold: frames with VAD below this are blended back toward original
+    //               to prevent aggressive gating of quiet speech (default 0.0 = disabled)
+    explicit RNNoiseProcessor(float blend = 1.0f, float vadThreshold = 0.0f);
     ~RNNoiseProcessor();
 
     // Returns true if RNNoise library is available (compiled in)
@@ -25,14 +28,17 @@ public:
     // Returns false if RNNoise is not available.
     bool process(std::vector<int16_t>& audio, int sampleRate);
 
-    // Process stereo audio by splitting into channels, processing each, then re-interleaving
+    // Process stereo audio with LINKED VAD — both channels use the MAX VAD
+    // of the two so voices panned to one side are never gated independently.
     bool processStereo(std::vector<int16_t>& audio, int sampleRate);
 
     // VAD (voice activity detection) probability from last processed frame (0.0 - 1.0)
     float lastVAD() const { return lastVad_; }
 
 private:
-    float lastVad_ = 0.0f;
+    float blend_        = 1.0f;  // wet/dry mix
+    float vadThreshold_ = 0.0f; // below this VAD, fade toward dry
+    float lastVad_      = 0.0f;
 
 #ifdef HAVE_RNNOISE
     DenoiseState* state_ = nullptr;
@@ -43,6 +49,8 @@ private:
     static std::vector<float> int16ToFloat(const std::vector<int16_t>& in);
     static void floatToInt16(const std::vector<float>& in, std::vector<int16_t>& out);
 
-    bool processMonoFloat(std::vector<float>& samples);
+    float processMonoFloat(std::vector<float>& samples,
+                           const std::vector<float>& dry,
+                           float vadOverride = -1.0f);
 #endif
 };
