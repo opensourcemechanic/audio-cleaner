@@ -26,7 +26,6 @@ set(CORE_SOURCES
     src/audio_processor.cpp
     src/wav_format.cpp
     src/audio_processor_backend.cpp
-    src/rnnoise_processor.cpp
 )
 
 # Add optional format sources based on library availability
@@ -170,6 +169,8 @@ if(ENABLE_RNNOISE)
         target_compile_definitions(audio_cleaner PRIVATE HAVE_RNNOISE)
         target_include_directories(audio_cleaner PRIVATE ${RNNOISE_INCLUDE_DIR})
         target_link_libraries(audio_cleaner ${RNNOISE_LIB})
+        # Add RNNoise processor source only when library is available
+        target_sources(audio_cleaner PRIVATE src/rnnoise_processor.cpp)
         message(STATUS "RNNoise found - neural network denoising enabled")
     else()
         message(WARNING "ENABLE_RNNOISE set but rnnoise library not found. "
