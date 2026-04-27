@@ -452,7 +452,7 @@ void AudioProcessor::processClippingReduction(std::vector<int16_t>& audio, float
     std::cout << "✅ Applied: Clipping reduction\n";
 }
 
-void AudioProcessor::applyHighPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate) {
+void AudioProcessor::applyHighPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate, int numChannels) {
     // Simple IIR high-pass filter using Butterworth design
     // This will remove low-frequency noise like "breathing" sounds
     
@@ -465,13 +465,14 @@ void AudioProcessor::applyHighPassFilter(std::vector<int16_t>& audio, float cuto
     float a2 = (c - 1.0f) / (c + 1.0f);
     float b0 = 1.0f / (c + 1.0f);
     float b1 = -1.0f / (c + 1.0f);
-    
-    // Apply filter to each channel separately
-    for (int channel = 0; channel < 2; ++channel) {
-        float x1 = 0.0f, x2 = 0.0f;  // Input history
-        float y1 = 0.0f, y2 = 0.0f;  // Output history
+    (void)a1;
+
+    // Process each channel independently using the actual channel count
+    for (int channel = 0; channel < numChannels; ++channel) {
+        float x1 = 0.0f;
+        float y1 = 0.0f;
         
-        for (size_t i = channel; i < audio.size(); i += 2) {
+        for (size_t i = channel; i < audio.size(); i += numChannels) {
             float input = static_cast<float>(audio[i]) / 32768.0f;
             
             // Apply high-pass filter difference equation
@@ -487,7 +488,7 @@ void AudioProcessor::applyHighPassFilter(std::vector<int16_t>& audio, float cuto
     }
 }
 
-void AudioProcessor::processLowFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency) {
+void AudioProcessor::processLowFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate, int numChannels) {
     // This method applies a high-pass filter to remove low-frequency periodic noise
     // Default cutoff is 80 Hz, which removes most "breathing" and rumble sounds
     
@@ -498,14 +499,12 @@ void AudioProcessor::processLowFrequencyRemoval(std::vector<int16_t>& audio, flo
     std::cout << "   • Filter type: 2nd order Butterworth IIR\n";
     std::cout << "\n";
     
-    // Apply the high-pass filter (assuming 44.1 kHz sample rate)
-    int sampleRate = 44100; // Could be made configurable
-    applyHighPassFilter(audio, cutoffFrequency, sampleRate);
+    applyHighPassFilter(audio, cutoffFrequency, sampleRate, numChannels);
     
     std::cout << "✅ Applied: Low-frequency noise removal\n";
 }
 
-void AudioProcessor::applyLowPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate) {
+void AudioProcessor::applyLowPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate, int numChannels) {
     // 2nd-order Butterworth low-pass IIR filter
     float nyquist = sampleRate / 2.0f;
     float normalizedCutoff = cutoffFrequency / nyquist;
@@ -518,12 +517,10 @@ void AudioProcessor::applyLowPassFilter(std::vector<int16_t>& audio, float cutof
     float a1 =  2.0f * (c * c - 1.0f) / denom;
     float a2 =  (c * c - c * sqrtf(2.0f) + 1.0f) / denom;
 
-    // Determine stride: if audio is stereo (even indexed) process each channel
-    int channels = (audio.size() % 2 == 0) ? 2 : 1;
-    for (int ch = 0; ch < channels; ++ch) {
+    for (int ch = 0; ch < numChannels; ++ch) {
         float x1 = 0.0f, x2 = 0.0f;
         float y1 = 0.0f, y2 = 0.0f;
-        for (size_t i = ch; i < audio.size(); i += channels) {
+        for (size_t i = ch; i < audio.size(); i += numChannels) {
             float x = static_cast<float>(audio[i]) / 32768.0f;
             float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
             x2 = x1; x1 = x;
@@ -533,7 +530,7 @@ void AudioProcessor::applyLowPassFilter(std::vector<int16_t>& audio, float cutof
     }
 }
 
-void AudioProcessor::processHighFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency) {
+void AudioProcessor::processHighFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate, int numChannels) {
     std::cout << "🔧 HIGH-FREQUENCY NOISE REMOVAL:\n";
     std::cout << "   • Low-pass filter at " << cutoffFrequency << " Hz cutoff\n";
     std::cout << "   • Removes: Tape hiss, high-frequency noise, aliasing artifacts\n";
@@ -541,8 +538,7 @@ void AudioProcessor::processHighFrequencyRemoval(std::vector<int16_t>& audio, fl
     std::cout << "   • Filter type: 2nd order Butterworth IIR\n";
     std::cout << "\n";
 
-    int sampleRate = 44100;
-    applyLowPassFilter(audio, cutoffFrequency, sampleRate);
+    applyLowPassFilter(audio, cutoffFrequency, sampleRate, numChannels);
 
     std::cout << "✅ Applied: High-frequency noise removal\n";
 }

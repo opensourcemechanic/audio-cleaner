@@ -48,7 +48,7 @@ private:
     bool isOpen;
     int quality; // 0-9, 0 being highest quality
     std::string filename;
-    std::ofstream file;
+    FILE* file;  // Use C FILE* so LAME can write Xing header via lame_mp3_tags_fid
     
 public:
     Mp3Writer(int quality = 2);

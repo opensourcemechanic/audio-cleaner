@@ -432,12 +432,14 @@ int main(int argc, char* argv[]) {
     
     // Apply low-frequency removal if enabled
     if (enableLowFreqRemoval) {
-        processor.processLowFrequencyRemoval(audioData, lowFreqCutoff);
+        processor.processLowFrequencyRemoval(audioData, lowFreqCutoff,
+            inputFormat.sampleRate, inputFormat.numChannels);
     }
 
     // Apply high-frequency removal if enabled
     if (enableHighFreqRemoval) {
-        processor.processHighFrequencyRemoval(audioData, highFreqCutoff);
+        processor.processHighFrequencyRemoval(audioData, highFreqCutoff,
+            inputFormat.sampleRate, inputFormat.numChannels);
     }
     
     // Apply normalization if enabled

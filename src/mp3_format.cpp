@@ -115,7 +115,7 @@ bool Mp3Reader::canHandle(const std::string& filename) const {
     return ext == "mp3";
 }
 
-Mp3Writer::Mp3Writer(int quality) : lameHandle(nullptr), isOpen(false), quality(quality), filename("") {}
+Mp3Writer::Mp3Writer(int quality) : lameHandle(nullptr), isOpen(false), quality(quality), filename(""), file(nullptr) {}
 
 Mp3Writer::~Mp3Writer() {
     close();
@@ -143,6 +143,8 @@ bool Mp3Writer::open(const std::string& filename, const AudioFormat& fmt) {
     lame_set_brate(lameHandle, 128); // 128 kbps bitrate
     lame_set_mode(lameHandle, fmt.numChannels == 1 ? MONO : JOINT_STEREO);
     lame_set_quality(lameHandle, quality); // 0-9, 0 = best quality
+    // Enable VBR tag (Xing header) for accurate duration reporting
+    lame_set_bWriteVbrTag(lameHandle, 1);
     
     if (lame_init_params(lameHandle) < 0) {
         std::cerr << "Error: Failed to initialize LAME parameters" << std::endl;
@@ -150,10 +152,10 @@ bool Mp3Writer::open(const std::string& filename, const AudioFormat& fmt) {
         lameHandle = nullptr;
         return false;
     }
-    
-    // Open output file
-    file.open(filename, std::ios::binary);
-    if (!file.is_open()) {
+
+    // Open output file using C FILE* in read+write mode so LAME can seek back and write Xing header
+    file = fopen(filename.c_str(), "w+b");
+    if (!file) {
         std::cerr << "Error: Cannot create MP3 file " << filename << std::endl;
         lame_close(lameHandle);
         lameHandle = nullptr;
@@ -165,12 +167,12 @@ bool Mp3Writer::open(const std::string& filename, const AudioFormat& fmt) {
 }
 
 bool Mp3Writer::write(const std::vector<int16_t>& audioData) {
-    if (!isOpen || !lameHandle) {
+    if (!isOpen || !lameHandle || !file) {
         std::cerr << "Error: MP3 file not open for writing" << std::endl;
         return false;
     }
     
-    const int bufferSize = 4096;
+    const int bufferSize = 8192;
     unsigned char mp3Buffer[bufferSize];
     
     if (format.numChannels == 1) {
@@ -193,7 +195,7 @@ bool Mp3Writer::write(const std::vector<int16_t>& audioData) {
             }
             
             if (bytesWritten > 0) {
-                file.write(reinterpret_cast<const char*>(mp3Buffer), bytesWritten);
+                fwrite(mp3Buffer, 1, bytesWritten, file);
             }
             
             samplesProcessed += samplesToProcess;
@@ -230,7 +232,7 @@ bool Mp3Writer::write(const std::vector<int16_t>& audioData) {
             }
             
             if (bytesWritten > 0) {
-                file.write(reinterpret_cast<const char*>(mp3Buffer), bytesWritten);
+                fwrite(mp3Buffer, 1, bytesWritten, file);
             }
             
             framesProcessed += framesToProcess;
@@ -241,22 +243,26 @@ bool Mp3Writer::write(const std::vector<int16_t>& audioData) {
 }
 
 void Mp3Writer::close() {
-    if (isOpen && lameHandle) {
-        // Flush remaining MP3 data
-        const int bufferSize = 4096;
+    if (isOpen && lameHandle && file) {
+        // Flush remaining buffered MP3 data (encoder delay tail)
+        const int bufferSize = 7200; // LAME recommends 7200 for flush buffer
         unsigned char mp3Buffer[bufferSize];
         
         int bytesWritten = lame_encode_flush(lameHandle, mp3Buffer, bufferSize);
-        if (bytesWritten > 0 && file.is_open()) {
-            file.write(reinterpret_cast<const char*>(mp3Buffer), bytesWritten);
+        if (bytesWritten > 0) {
+            fwrite(mp3Buffer, 1, bytesWritten, file);
         }
-        
+
+        // Write Xing/Info VBR header at the start of the file.
+        // lame_mp3_tags_fid() seeks back to frame 0 and writes the header
+        // with accurate frame count and duration info.
+        lame_mp3_tags_fid(lameHandle, file);
+
+        fclose(file);
+        file = nullptr;
+
         lame_close(lameHandle);
         lameHandle = nullptr;
-        
-        if (file.is_open()) {
-            file.close();
-        }
     }
     isOpen = false;
 }
