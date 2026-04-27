@@ -2,6 +2,7 @@
 #include "../include/audio_processor.h"
 #include "../include/audio_processor_backend.h"
 #include "../include/wav_format.h"
+#include "../include/rnnoise_processor.h"
 
 #ifdef HAVE_MPG123
 #ifdef HAVE_LAME
@@ -71,6 +72,8 @@ void printUsage(const char* programName) {
     std::cout << "  --fft-size <size>   FFT size for spectral analysis (128-65536, power of 2, default: 512)\n";
     std::cout << "  --reduce-clipping   Smooth clipped audio peaks (default threshold: 95%)\n";
     std::cout << "  --clipping-threshold <threshold> Clipping threshold (0.8-0.99, default: 0.95)\n";
+    std::cout << "  --rnnoise           Apply RNNoise neural network denoising (requires librnnoise)\n";
+    std::cout << "  --rnnoise-only      Apply ONLY RNNoise (skip spectral subtraction DSP)\n";
     std::cout << "  --force-gpu         Force GPU acceleration (requires OpenCL)\n";
     std::cout << "  --backend <type>    Force processing backend (cpu/opencl/auto)\n";
     std::cout << "  -f                  List supported formats\n";
@@ -133,6 +136,8 @@ int main(int argc, char* argv[]) {
     float clippingThreshold = 0.95f;
     bool forceGPU = false;
     std::string backendType = "auto";
+    bool enableRNNoise = false;
+    bool rnnoiseOnly = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -215,6 +220,13 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Warning: Invalid clipping threshold " << clippingThreshold << ", using 0.95" << std::endl;
                 clippingThreshold = 0.95f;
             }
+        }
+        else if (arg == "--rnnoise") {
+            enableRNNoise = true;
+        }
+        else if (arg == "--rnnoise-only") {
+            enableRNNoise = true;
+            rnnoiseOnly = true;
         }
         else if (arg == "--force-gpu") {
             forceGPU = true;
@@ -324,35 +336,70 @@ int main(int argc, char* argv[]) {
     std::cout << "Processing audio...\n";
     std::cout << "\n=== AUDIO CLEANING ALGORITHMS ===\n\n";
     
-    if (hasReference) {
-        std::cout << "🔧 ECHO CANCELLATION + NOISE REDUCTION:\n";
-        std::cout << "   • Echo Cancellation: Using adaptive LMS filter to model and remove echo\n";
-        std::cout << "     - Reference signal helps identify echo components\n";
-        std::cout << "     - Learning rate: " << learningRate << " (controls adaptation speed)\n";
-        std::cout << "     - Continuously adjusts filter coefficients to match echo path\n";
+    // --- RNNoise check ---
+    if (enableRNNoise && !RNNoiseProcessor::isAvailable()) {
+        std::cerr << "Warning: --rnnoise requested but RNNoise library not compiled in.\n";
+        std::cerr << "  Linux: sudo apt install librnnoise-dev && cmake -DENABLE_RNNOISE=ON\n";
+        std::cerr << "  Continuing without RNNoise.\n";
+        enableRNNoise = false;
+        rnnoiseOnly = false;
+    }
+
+    if (!rnnoiseOnly) {
+        if (hasReference) {
+            std::cout << "🔧 ECHO CANCELLATION + NOISE REDUCTION:\n";
+            std::cout << "   • Echo Cancellation: Using adaptive LMS filter to model and remove echo\n";
+            std::cout << "     - Reference signal helps identify echo components\n";
+            std::cout << "     - Learning rate: " << learningRate << " (controls adaptation speed)\n";
+            std::cout << "     - Continuously adjusts filter coefficients to match echo path\n";
+            std::cout << "\n";
+            std::cout << "   • Noise Reduction: Spectral subtraction algorithm\n";
+            std::cout << "     - Analyzes audio in frequency domain using FFT\n";
+            std::cout << "     - Estimates background noise spectrum from quiet segments\n";
+            std::cout << "     - Subtracts noise estimate while preserving speech/music\n";
+            std::cout << "     - Applies spectral flooring to prevent musical noise artifacts\n";
+            std::cout << "\n";
+            processor.processFull(audioData, referenceData);
+            std::cout << "✅ Applied: Echo cancellation + Noise reduction\n";
+        } else {
+            std::cout << "🔧 NOISE REDUCTION ONLY:\n";
+            std::cout << "   • Spectral Subtraction Algorithm:\n";
+            std::cout << "     - Converts audio to frequency domain using " << fftSize << "-point FFT\n";
+            std::cout << "     - Uses 75% overlap windowing for smooth transitions\n";
+            std::cout << "     - Estimates noise profile from first audio frames\n";
+            std::cout << "     - Subtracts estimated noise from frequency spectrum\n";
+            std::cout << "     - Applies Hann window to reduce spectral artifacts\n";
+            std::cout << "     - Converts back to time domain with overlap-add\n";
+            std::cout << "\n";
+            std::cout << "   • Best for: Stationary background noise (hiss, hum, fan noise)\n";
+            std::cout << "   • Limitations: Less effective for rapidly changing noise\n";
+            std::cout << "\n";
+            processor.processNoiseReduction(audioData);
+        }
+    }
+
+    // --- RNNoise neural network denoising (runs after DSP or standalone) ---
+    if (enableRNNoise) {
+        std::cout << "🧠 RNNOISE NEURAL NETWORK DENOISING:\n";
+        std::cout << "   • Model: Xiph.org RNNoise (GRU-based noise suppression)\n";
+        std::cout << "   • Frame size: 480 samples at 48kHz (10ms)\n";
+        if (rnnoiseOnly)
+            std::cout << "   • Mode: Standalone (DSP algorithms skipped)\n";
+        else
+            std::cout << "   • Mode: Post-DSP (applied after spectral subtraction)\n";
         std::cout << "\n";
-        std::cout << "   • Noise Reduction: Spectral subtraction algorithm\n";
-        std::cout << "     - Analyzes audio in frequency domain using FFT\n";
-        std::cout << "     - Estimates background noise spectrum from quiet segments\n";
-        std::cout << "     - Subtracts noise estimate while preserving speech/music\n";
-        std::cout << "     - Applies spectral flooring to prevent musical noise artifacts\n";
-        std::cout << "\n";
-        processor.processFull(audioData, referenceData);
-        std::cout << "✅ Applied: Echo cancellation + Noise reduction\n";
-    } else {
-        std::cout << "🔧 NOISE REDUCTION ONLY:\n";
-        std::cout << "   • Spectral Subtraction Algorithm:\n";
-        std::cout << "     - Converts audio to frequency domain using 512-point FFT\n";
-        std::cout << "     - Uses 75% overlap windowing for smooth transitions\n";
-        std::cout << "     - Estimates noise profile from first audio frames\n";
-        std::cout << "     - Subtracts estimated noise from frequency spectrum\n";
-        std::cout << "     - Applies Hann window to reduce spectral artifacts\n";
-        std::cout << "     - Converts back to time domain with overlap-add\n";
-        std::cout << "\n";
-        std::cout << "   • Best for: Stationary background noise (hiss, hum, fan noise)\n";
-        std::cout << "   • Limitations: Less effective for rapidly changing noise\n";
-        std::cout << "\n";
-        processor.processNoiseReduction(audioData);
+
+        RNNoiseProcessor rnn;
+        bool rnOk = false;
+        if (inputFormat.numChannels == 2)
+            rnOk = rnn.processStereo(audioData, inputFormat.sampleRate);
+        else
+            rnOk = rnn.process(audioData, inputFormat.sampleRate);
+
+        if (rnOk)
+            std::cout << "✅ Applied: RNNoise denoising (final VAD: " << rnn.lastVAD() << ")\n";
+        else
+            std::cerr << "Warning: RNNoise processing failed\n";
     }
     
     // Apply low-frequency removal if enabled

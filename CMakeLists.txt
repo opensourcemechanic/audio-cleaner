@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Optional OpenCL GPU acceleration
 option(ENABLE_OPENCL "Enable OpenCL GPU acceleration" OFF)
 
+# Optional RNNoise neural network denoising
+option(ENABLE_RNNOISE "Enable RNNoise neural network denoising" OFF)
+
 # Try to detect and set compiler
 if(MSVC)
     set(CMAKE_CXX_FLAGS "/W4 /O2")
@@ -23,6 +26,7 @@ set(CORE_SOURCES
     src/audio_processor.cpp
     src/wav_format.cpp
     src/audio_processor_backend.cpp
+    src/rnnoise_processor.cpp
 )
 
 # Add optional format sources based on library availability
@@ -150,6 +154,30 @@ if(WIN32)
             C:/AudioLibs/lib/libmp3lame.dll
             $<TARGET_FILE_DIR:audio_cleaner>)
     endif()
+endif()
+
+# RNNoise neural network denoising (optional)
+if(ENABLE_RNNOISE)
+    if(WIN32)
+        find_library(RNNOISE_LIB NAMES rnnoise PATHS "C:/AudioLibs/lib")
+        find_path(RNNOISE_INCLUDE_DIR rnnoise.h PATHS "C:/AudioLibs/include")
+    else()
+        find_library(RNNOISE_LIB NAMES rnnoise)
+        find_path(RNNOISE_INCLUDE_DIR rnnoise.h)
+    endif()
+
+    if(RNNOISE_LIB AND RNNOISE_INCLUDE_DIR)
+        target_compile_definitions(audio_cleaner PRIVATE HAVE_RNNOISE)
+        target_include_directories(audio_cleaner PRIVATE ${RNNOISE_INCLUDE_DIR})
+        target_link_libraries(audio_cleaner ${RNNOISE_LIB})
+        message(STATUS "RNNoise found - neural network denoising enabled")
+    else()
+        message(WARNING "ENABLE_RNNOISE set but rnnoise library not found. "
+            "Linux: sudo apt install librnnoise-dev  "
+            "Windows: place rnnoise.lib + rnnoise.h in C:/AudioLibs")
+    endif()
+else()
+    message(STATUS "RNNoise disabled (use -DENABLE_RNNOISE=ON to enable)")
 endif()
 
 install(TARGETS audio_cleaner
