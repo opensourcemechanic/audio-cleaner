@@ -24,6 +24,7 @@ private:
     void spectralSubtraction(std::vector<std::complex<float>>& spectrum);
     void adaptiveEchoCancellation(std::vector<int16_t>& input, std::vector<int16_t>& reference);
     void applyHighPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate);
+    void applyLowPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate);
     void normalizeAudio(std::vector<int16_t>& audio, float targetLevel = -6.0f);
     
 public:
@@ -34,6 +35,7 @@ public:
     void processNoiseReduction(std::vector<int16_t>& audio);
     void processFull(std::vector<int16_t>& audio, const std::vector<int16_t>& reference);
     void processLowFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency = 80.0f);
+    void processHighFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency = 8000.0f);
     void processNormalization(std::vector<int16_t>& audio, float targetLevel = -6.0f);
     void processClippingReduction(std::vector<int16_t>& audio, float threshold = 0.95f);
     

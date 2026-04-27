@@ -76,6 +76,7 @@ void printUsage(const char* programName) {
     std::cout << "  --rnnoise-only      Apply ONLY RNNoise (skip spectral subtraction DSP)\n";
     std::cout << "  --rnnoise-blend <f> Wet/dry mix for RNNoise (0.0=dry, 1.0=full denoise, default: 1.0)\n";
     std::cout << "  --rnnoise-vad <f>   Fade toward dry when VAD < threshold (0.0-1.0, default: 0.0=off)\n";
+    std::cout << "  --high-freq <hz>    Remove high-frequency noise above specified Hz (1000-20000, default: off)\n";
     std::cout << "  --force-gpu         Force GPU acceleration (requires OpenCL)\n";
     std::cout << "  --backend <type>    Force processing backend (cpu/opencl/auto)\n";
     std::cout << "  -f                  List supported formats\n";
@@ -142,6 +143,8 @@ int main(int argc, char* argv[]) {
     bool rnnoiseOnly = false;
     float rnnoiseBlend = 1.0f;      // 1.0 = full denoised, 0.0 = dry
     float rnnoiseVadThreshold = 0.0f; // 0.0 = disabled
+    float highFreqCutoff = 0.0f;      // 0.0 = disabled
+    bool enableHighFreqRemoval = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -239,6 +242,11 @@ int main(int argc, char* argv[]) {
         else if (arg == "--rnnoise-vad" && i + 1 < argc) {
             rnnoiseVadThreshold = std::stof(argv[++i]);
             rnnoiseVadThreshold = std::max(0.0f, std::min(1.0f, rnnoiseVadThreshold));
+        }
+        else if (arg == "--high-freq" && i + 1 < argc) {
+            highFreqCutoff = std::stof(argv[++i]);
+            enableHighFreqRemoval = true;
+            highFreqCutoff = std::max(1000.0f, std::min(20000.0f, highFreqCutoff));
         }
         else if (arg == "--force-gpu") {
             forceGPU = true;
@@ -425,6 +433,11 @@ int main(int argc, char* argv[]) {
     // Apply low-frequency removal if enabled
     if (enableLowFreqRemoval) {
         processor.processLowFrequencyRemoval(audioData, lowFreqCutoff);
+    }
+
+    // Apply high-frequency removal if enabled
+    if (enableHighFreqRemoval) {
+        processor.processHighFrequencyRemoval(audioData, highFreqCutoff);
     }
     
     // Apply normalization if enabled

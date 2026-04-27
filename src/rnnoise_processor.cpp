@@ -24,10 +24,9 @@ bool RNNoiseProcessor::processStereo(std::vector<int16_t>&, int) {
     return false;
 }
 
-// ---------------------------------------------------------------------------
-// Full implementation when RNNoise IS compiled in
-// ---------------------------------------------------------------------------
-#else
+#endif // !HAVE_RNNOISE
+
+#ifdef HAVE_RNNOISE
 
 RNNoiseProcessor::RNNoiseProcessor(float blend, float vadThreshold)
     : blend_(std::max(0.0f, std::min(1.0f, blend)))
@@ -238,3 +237,4 @@ bool RNNoiseProcessor::processStereo(std::vector<int16_t>& audio, int sampleRate
 }
 
 #endif // HAVE_RNNOISE
+

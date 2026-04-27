@@ -505,6 +505,48 @@ void AudioProcessor::processLowFrequencyRemoval(std::vector<int16_t>& audio, flo
     std::cout << "✅ Applied: Low-frequency noise removal\n";
 }
 
+void AudioProcessor::applyLowPassFilter(std::vector<int16_t>& audio, float cutoffFrequency, int sampleRate) {
+    // 2nd-order Butterworth low-pass IIR filter
+    float nyquist = sampleRate / 2.0f;
+    float normalizedCutoff = cutoffFrequency / nyquist;
+
+    float c = tanf(PI * normalizedCutoff);
+    float denom = c * c + c * sqrtf(2.0f) + 1.0f;
+    float b0 =  c * c / denom;
+    float b1 =  2.0f * b0;
+    float b2 =  b0;
+    float a1 =  2.0f * (c * c - 1.0f) / denom;
+    float a2 =  (c * c - c * sqrtf(2.0f) + 1.0f) / denom;
+
+    // Determine stride: if audio is stereo (even indexed) process each channel
+    int channels = (audio.size() % 2 == 0) ? 2 : 1;
+    for (int ch = 0; ch < channels; ++ch) {
+        float x1 = 0.0f, x2 = 0.0f;
+        float y1 = 0.0f, y2 = 0.0f;
+        for (size_t i = ch; i < audio.size(); i += channels) {
+            float x = static_cast<float>(audio[i]) / 32768.0f;
+            float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x;
+            y2 = y1; y1 = y;
+            audio[i] = static_cast<int16_t>(std::max(-32768.0f, std::min(32767.0f, y * 32768.0f)));
+        }
+    }
+}
+
+void AudioProcessor::processHighFrequencyRemoval(std::vector<int16_t>& audio, float cutoffFrequency) {
+    std::cout << "🔧 HIGH-FREQUENCY NOISE REMOVAL:\n";
+    std::cout << "   • Low-pass filter at " << cutoffFrequency << " Hz cutoff\n";
+    std::cout << "   • Removes: Tape hiss, high-frequency noise, aliasing artifacts\n";
+    std::cout << "   • Preserves: Voice, music, and low/mid frequency content\n";
+    std::cout << "   • Filter type: 2nd order Butterworth IIR\n";
+    std::cout << "\n";
+
+    int sampleRate = 44100;
+    applyLowPassFilter(audio, cutoffFrequency, sampleRate);
+
+    std::cout << "✅ Applied: High-frequency noise removal\n";
+}
+
 void AudioProcessor::normalizeAudio(std::vector<int16_t>& audio, float targetLevel) {
     // Normalize audio to target level in dB (standard audio levels)
     // Common levels: -3dB (hot), -6dB (standard), -12dB (conservative), -20dB (quiet)
