@@ -430,14 +430,29 @@ int main(int argc, char* argv[]) {
             std::cerr << "Warning: RNNoise processing failed\n";
     }
     
-    // Apply low-frequency removal if enabled
-    if (enableLowFreqRemoval) {
+    // Apply frequency filters after all processing (so they're not undone by normalization)
+    if (enableLowFreqRemoval && enableHighFreqRemoval) {
+        // Both filters enabled - apply as band-pass filter
+        std::cout << "🔧 BAND-PASS FILTER:\n";
+        std::cout << "   • Pass band: " << lowFreqCutoff << " Hz to " << highFreqCutoff << " Hz\n";
+        std::cout << "   • Removes: Low-frequency rumble AND high-frequency hiss\n";
+        std::cout << "   • Preserves: Target frequency range only\n";
+        std::cout << "   • Filter type: Cascaded 2nd order Butterworth IIR\n";
+        std::cout << "\n";
+        
+        // Apply high-pass first, then low-pass for band-pass effect
         processor.processLowFrequencyRemoval(audioData, lowFreqCutoff,
             inputFormat.sampleRate, inputFormat.numChannels);
-    }
-
-    // Apply high-frequency removal if enabled
-    if (enableHighFreqRemoval) {
+        processor.processHighFrequencyRemoval(audioData, highFreqCutoff,
+            inputFormat.sampleRate, inputFormat.numChannels);
+        
+        std::cout << "✅ Applied: Band-pass filter (" << lowFreqCutoff << "-" << highFreqCutoff << " Hz)\n";
+    } else if (enableLowFreqRemoval) {
+        // Only low-frequency removal
+        processor.processLowFrequencyRemoval(audioData, lowFreqCutoff,
+            inputFormat.sampleRate, inputFormat.numChannels);
+    } else if (enableHighFreqRemoval) {
+        // Only high-frequency removal
         processor.processHighFrequencyRemoval(audioData, highFreqCutoff,
             inputFormat.sampleRate, inputFormat.numChannels);
     }

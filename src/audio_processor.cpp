@@ -216,7 +216,7 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
     for (int i = 0; i <= fftSize / 2; ++i) {
         if (noiseFramesUsed > 0) {
             noiseSpectrum[i] = sqrtf(std::abs(noiseSpectrum[i]) / noiseFramesUsed);
-            noiseSpectrum[i] *= 0.3f;  // Conservative scaling
+            noiseSpectrum[i] *= 0.8f;  // Less conservative scaling
         }
     }
     
@@ -224,8 +224,8 @@ void AudioProcessor::estimateNoiseSpectrum(const std::vector<int16_t>& audio) {
 }
 
 void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spectrum) {
-    const float ALPHA = 0.3f;  // Much more conservative - only 30% subtraction
-    const float BETA = 0.3f;   // Higher floor - preserve 30% of original signal
+    const float ALPHA = 0.8f;  // More aggressive - 80% subtraction
+    const float BETA = 0.1f;   // Lower floor - preserve only 10% of original signal
     
     if (backend) {
         // Convert noiseSpectrum to float for backend
@@ -243,6 +243,7 @@ void AudioProcessor::spectralSubtraction(std::vector<std::complex<float>>& spect
             
             float subtractedMagnitude = magnitude - ALPHA * noiseSpectrum[i];
             subtractedMagnitude = std::max(subtractedMagnitude, BETA * magnitude);
+            
             
             spectrum[i] = std::polar(subtractedMagnitude, phase);
             if (i > 0 && i < fftSize / 2) {
