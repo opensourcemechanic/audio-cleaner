@@ -399,7 +399,7 @@ int main(int argc, char* argv[]) {
     }
 
     // --- RNNoise neural network denoising (runs after DSP or standalone) ---
-    if (enableRNNoise) {
+    if (enableRNNoise && RNNoiseProcessor::isAvailable()) {
         std::cout << "🧠 RNNOISE NEURAL NETWORK DENOISING:\n";
         std::cout << "   • Model: Xiph.org RNNoise (GRU-based noise suppression)\n";
         std::cout << "   • Frame size: 480 samples at 48kHz (10ms)\n";

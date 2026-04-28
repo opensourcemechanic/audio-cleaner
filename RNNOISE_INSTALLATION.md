@@ -19,7 +19,16 @@ RNNoise is a neural network-based noise suppression library developed by Xiph.or
 ```bash
 # Install RNNoise development package
 sudo apt update
+
+# Try Ubuntu/Debian package first
 sudo apt install librnnoise-dev
+
+# If not found, try these alternatives:
+sudo apt install rnnoise-dev  # Some distributions use this name
+sudo apt install librnnoise0-dev  # Ubuntu 22.04+ sometimes uses this
+
+# If still not found, you may need to add repositories or build from source
+# (see Method 2 below)
 
 # Build audio-cleaner with RNNoise support
 cd audio-cleaner
@@ -153,6 +162,28 @@ After installation, verify RNNoise is working:
 ```
 
 ## Troubleshooting
+
+### "Package not found" (apt install fails)
+
+```bash
+# Check your distribution version
+lsb_release -a
+
+# For Ubuntu 20.04 and older:
+sudo apt install librnnoise-dev
+
+# For Ubuntu 22.04 and newer:
+sudo apt install librnnoise0-dev
+# OR add universe repository:
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install librnnoise-dev
+
+# For Debian 11+:
+sudo apt install librnnoise-dev
+
+# If package doesn't exist in your distro, build from source (Method 2)
+```
 
 ### "RNNoise library not compiled in"
 ```bash
